@@ -1,0 +1,11 @@
+# Python virtual environment
+.venv/
+__pycache__/
+*.pyc
+
+# Environment variables containing secret tokens
+.env
+
+# OS-specific files
+.DS_Store
+Thumbs.db
