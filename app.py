@@ -1,6 +1,8 @@
 import os
 import sys
 import discord
+import threading
+import gradio as gr
 from config import Config
 import discord_actions
 from gemini_agent import GeminiAgent
@@ -19,7 +21,6 @@ if missing_envs:
     sys.exit(1)
 
 # Configure Discord Intents
-# default() includes guilds, voice_states, etc. but not members/message_content by default
 intents = discord.Intents.default()
 intents.message_content = True  # Required to read mention text
 intents.members = True          # Required to resolve members & nicknames
@@ -38,36 +39,29 @@ async def on_ready():
 
 @bot.event
 async def on_message(message: discord.Message):
-    # Avoid responding to own messages
     if message.author == bot.user:
         return
 
-    # Check if the bot is mentioned or if it is a Direct Message
     is_dm = isinstance(message.channel, discord.DMChannel)
     is_mentioned = bot.user in message.mentions
 
     if is_mentioned or is_dm:
-        # Check permissions: Only allow users with Manage Server or Administrator rights to instruct the bot.
-        # DMs don't have guild permissions, so we check if the user is an administrator on a mutual guild.
         authorized = False
         if is_dm:
-            # Check if user has admin permission in any mutual guild
             for guild in message.author.mutual_guilds:
                 member = guild.get_member(message.author.id)
                 if member and (member.guild_permissions.administrator or member.guild_permissions.manage_guild):
                     authorized = True
                     break
         else:
-            # In-guild permission check
             author = message.guild.get_member(message.author.id)
             if author and (author.guild_permissions.administrator or author.guild_permissions.manage_guild):
                 authorized = True
 
         if not authorized:
-            await message.channel.send("❌ Permission Denied: Only server administrators or members with 'Manage Server' privileges can command this bot.")
+            await message.channel.send("❌ Permission Denied: Only server administrators can command this bot.")
             return
 
-        # Extract clean prompt (strip mention tags)
         mention_str = f"<@{bot.user.id}>"
         mention_str_nick = f"<@!{bot.user.id}>"
         prompt = message.content.replace(mention_str, "").replace(mention_str_nick, "").strip()
@@ -79,7 +73,6 @@ async def on_message(message: discord.Message):
             )
             return
 
-        # Prepare context payload for the Gemini agent
         context_info = {
             "guild_id": message.guild.id if message.guild else None,
             "channel_id": message.channel.id,
@@ -87,14 +80,31 @@ async def on_message(message: discord.Message):
             "author_name": str(message.author),
         }
 
-        # Indicate to user that the bot is thinking/working
         async with message.channel.typing():
             try:
-                # Process message and execute necessary tool calls
                 ai_response = await agent.process_message(prompt, context_info)
                 await message.channel.send(ai_response)
             except Exception as e:
                 await message.channel.send(f"❌ Failed to process request: {str(e)}")
 
+# Define a simple Gradio web interface to satisfy Hugging Face and keep the bot alive
+def run_gradio():
+    def health_check(name):
+        return f"Hello {name}! The bot is active and running."
+        
+    demo = gr.Interface(
+        fn=health_check, 
+        inputs=gr.Textbox(label="Enter name"), 
+        outputs=gr.Textbox(label="Status"),
+        title="◈〖Ruler's Left Mechanical Hand〗◈ Status Panel",
+        description="A simple status panel to keep the Discord Bot running."
+    )
+    # Start Gradio on port 7860
+    demo.launch(server_name="0.0.0.0", server_port=7860, share=False)
+
 if __name__ == "__main__":
+    # Start Gradio in a background thread
+    threading.Thread(target=run_gradio, daemon=True).start()
+    
+    # Run the Discord bot client in the main thread (blocking)
     bot.run(Config.DISCORD_BOT_TOKEN)
