@@ -44,20 +44,27 @@ async def on_message(message: discord.Message):
     is_mentioned = bot.user in message.mentions
 
     if is_mentioned or is_dm:
-        authorized = False
+        allowed_roles = ["♕ 〖 Ruler 〗 ♕", "◈ 〖Undertaker Ruler's Right Hand〗 ◈"]
         if is_dm:
             for guild in message.author.mutual_guilds:
                 member = guild.get_member(message.author.id)
-                if member and (member.guild_permissions.administrator or member.guild_permissions.manage_guild):
-                    authorized = True
-                    break
+                if member:
+                    for role in member.roles:
+                        if role.name in allowed_roles:
+                            authorized = True
+                            break
+                    if authorized:
+                        break
         else:
             author = message.guild.get_member(message.author.id)
-            if author and (author.guild_permissions.administrator or author.guild_permissions.manage_guild):
-                authorized = True
+            if author:
+                for role in author.roles:
+                    if role.name in allowed_roles:
+                        authorized = True
+                        break
 
         if not authorized:
-            await message.channel.send("❌ Permission Denied: Only server administrators can command this bot.")
+            await message.channel.send("❌ Permission Denied: You do not have the required role to command this bot.")
             return
 
         mention_str = f"<@{bot.user.id}>"
