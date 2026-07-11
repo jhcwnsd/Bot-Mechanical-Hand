@@ -8,7 +8,7 @@ class GeminiAgent:
     def __init__(self):
         # google-genai client handles GEMINI_API_KEY from env automatically
         self.client = genai.Client()
-        self.model_name = "gemini-2.5-flash"
+        self.model_name = "gemini-3.5-flash"
         
         # Store conversation history per channel ID
         # Format: Dict[int, List[types.Content]]
