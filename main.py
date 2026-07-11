@@ -1,8 +1,6 @@
 import os
 import sys
 import discord
-import threading
-import gradio as gr
 from config import Config
 import discord_actions
 from gemini_agent import GeminiAgent
@@ -87,24 +85,5 @@ async def on_message(message: discord.Message):
             except Exception as e:
                 await message.channel.send(f"❌ Failed to process request: {str(e)}")
 
-# Define a simple Gradio web interface to satisfy Hugging Face and keep the bot alive
-def run_gradio():
-    def health_check(name):
-        return f"Hello {name}! The bot is active and running."
-        
-    demo = gr.Interface(
-        fn=health_check, 
-        inputs=gr.Textbox(label="Enter name"), 
-        outputs=gr.Textbox(label="Status"),
-        title="◈〖Ruler's Left Mechanical Hand〗◈ Status Panel",
-        description="A simple status panel to keep the Discord Bot running."
-    )
-    # Start Gradio on port 7860
-    demo.launch(server_name="0.0.0.0", server_port=7860, share=False)
-
 if __name__ == "__main__":
-    # Start Gradio in a background thread
-    threading.Thread(target=run_gradio, daemon=True).start()
-    
-    # Run the Discord bot client in the main thread (blocking)
     bot.run(Config.DISCORD_BOT_TOKEN)
