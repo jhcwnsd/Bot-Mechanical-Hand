@@ -462,3 +462,33 @@ async def set_role_permissions(
         return "Error: Bot lacks permission to edit this role."
     except Exception as e:
         return f"Error: {str(e)}"
+
+async def set_channel_permission_overwrite(
+    guild_id: str,
+    channel_id: str,
+    role_id: str,
+    view_channel: Optional[bool] = None,
+    send_messages: Optional[bool] = None
+) -> str:
+    if not _bot:
+        return "Error: Bot not initialized."
+    try:
+        guild = _bot.get_guild(int(guild_id))
+        channel = guild.get_channel(int(channel_id)) if guild else None
+        role = guild.get_role(int(role_id)) if guild else None
+    except ValueError:
+        return "Error: Invalid ID provided."
+    if not guild or not channel or not role:
+        return "Error: Guild, Channel, or Role not found."
+    try:
+        overwrite = channel.overwrites_for(role)
+        if view_channel is not None:
+            overwrite.view_channel = view_channel
+        if send_messages is not None:
+            overwrite.send_messages = send_messages
+        await channel.set_permissions(role, overwrite=overwrite)
+        return f"Success: Set permission overrides for role '{role.name}' on channel/category '{channel.name}'."
+    except discord.Forbidden:
+        return "Error: Bot lacks permission to edit channel overrides."
+    except Exception as e:
+        return f"Error: {str(e)}"
