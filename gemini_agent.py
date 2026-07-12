@@ -56,9 +56,9 @@ class GeminiAgent:
         """
         models_to_try = [
             "gemini-3.5-flash",
-            "gemini-1.5-flash",
-            "gemini-2.5-pro",
-            "gemini-1.5-pro"
+            "gemini-3.1-flash-lite",
+            "gemini-2.0-flash",
+            "gemini-2.5-pro"
         ]
         
         last_error = None
@@ -80,7 +80,7 @@ class GeminiAgent:
                     last_error = e
                     continue
                 else:
-                    # If it's a semantic/code error, raise immediately instead of looping
+                    # If it's a semantic/code error (e.g. schema/arguments), raise immediately
                     raise e
                     
         raise last_error
