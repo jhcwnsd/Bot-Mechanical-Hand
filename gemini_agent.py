@@ -8,7 +8,6 @@ class GeminiAgent:
     def __init__(self):
         # google-genai client handles GEMINI_API_KEY from env automatically
         self.client = genai.Client()
-        self.model_name = "gemini-3.5-flash"
         
         # Store conversation history per channel ID
         # Format: Dict[int, List[types.Content]]
@@ -51,10 +50,45 @@ class GeminiAgent:
             discord_actions.search_members
         ]
 
+    def _generate_content_with_fallback(self, contents: List[types.Content], config: types.GenerateContentConfig) -> Any:
+        """
+        Attempts to query models in a fallback sequence to bypass rate limits (429) or server overloads (503).
+        """
+        models_to_try = [
+            "gemini-3.5-flash",
+            "gemini-1.5-flash",
+            "gemini-2.5-pro",
+            "gemini-1.5-pro"
+        ]
+        
+        last_error = None
+        for model in models_to_try:
+            try:
+                print(f"Trying Gemini model: {model}")
+                response = self.client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=config
+                )
+                return response
+            except Exception as e:
+                err_msg = str(e)
+                # Catch rate limits (429), quota limits, or server overloads (503 / 500)
+                is_transient_error = any(term in err_msg for term in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "500"])
+                if is_transient_error:
+                    print(f"Warning: Model {model} is rate-limited or unavailable ({err_msg}). Trying fallback...")
+                    last_error = e
+                    continue
+                else:
+                    # If it's a semantic/code error, raise immediately instead of looping
+                    raise e
+                    
+        raise last_error
+
     async def process_message(self, prompt: str, context_info: dict) -> str:
         """
         Passes the prompt with guild context to Gemini, coordinates manual tool execution,
-        and returns the final AI text response.
+        and returns the final AI text response (with automatic rate-limit model fallback).
         """
         channel_id = context_info["channel_id"]
         
@@ -90,17 +124,12 @@ class GeminiAgent:
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
         )
 
-        # Call generate content with full history list
-        response = self.client.models.generate_content(
-            model=self.model_name,
-            contents=history,
-            config=config
-        )
+        # Call generate content with fallback
+        response = self._generate_content_with_fallback(history, config)
 
         # Handle potential function calling loops manually
         while response.function_calls:
             # Append the model's turn (containing the function call request) to history
-            # response.candidates[0].content contains the model's Content turn
             history.append(response.candidates[0].content)
 
             print(f"Gemini requested tool execution: {response.function_calls}")
@@ -136,12 +165,8 @@ class GeminiAgent:
                 )
             )
 
-            # Request next turn from Gemini with the tool outputs added
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=history,
-                config=config
-            )
+            # Request next turn from Gemini with fallback
+            response = self._generate_content_with_fallback(history, config)
 
         # Append the final model response (with the text answer) to history
         history.append(response.candidates[0].content)
