@@ -203,13 +203,12 @@ async def make_channel_private(guild_id: str, channel_id: str, role_id: str) -> 
     if not guild or not channel or not role:
         return "Error: Guild, Channel, or Role not found."
     try:
+        overwrites = channel.overwrites.copy()
         everyone = guild.default_role
-        overwrites = {
-            everyone: discord.PermissionOverwrite(view_channel=False),
-            role: discord.PermissionOverwrite(view_channel=True)
-        }
+        overwrites[everyone] = discord.PermissionOverwrite(view_channel=False)
+        overwrites[role] = discord.PermissionOverwrite(view_channel=True)
         await channel.edit(overwrites=overwrites)
-        return f"Success: Channel '{channel.name}' is now private for role '{role.name}'."
+        return f"Success: Channel '{channel.name}' is now private and accessible to role '{role.name}'."
     except discord.Forbidden:
         return "Error: Bot lacks 'Manage Roles' or 'Manage Channels' permission."
     except Exception as e:
