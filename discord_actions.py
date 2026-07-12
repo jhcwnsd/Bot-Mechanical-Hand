@@ -428,3 +428,37 @@ async def search_members(guild_id: str, query: str) -> str:
     if not matches:
         return f"No members found matching query '{query}'."
     return "\n".join(matches[:15])
+
+async def set_role_permissions(
+    guild_id: str, 
+    role_id: str, 
+    manage_messages: Optional[bool] = None, 
+    moderate_members: Optional[bool] = None,
+    manage_roles: Optional[bool] = None,
+    manage_channels: Optional[bool] = None
+) -> str:
+    if not _bot:
+        return "Error: Bot not initialized."
+    try:
+        guild = _bot.get_guild(int(guild_id))
+        role = guild.get_role(int(role_id)) if guild else None
+    except ValueError:
+        return "Error: Invalid ID provided."
+    if not guild or not role:
+        return "Error: Guild or Role not found."
+    try:
+        perms = role.permissions
+        if manage_messages is not None:
+            perms.update(manage_messages=manage_messages)
+        if moderate_members is not None:
+            perms.update(moderate_members=moderate_members)
+        if manage_roles is not None:
+            perms.update(manage_roles=manage_roles)
+        if manage_channels is not None:
+            perms.update(manage_channels=manage_channels)
+        await role.edit(permissions=perms)
+        return f"Success: Updated permissions for role '{role.name}'."
+    except discord.Forbidden:
+        return "Error: Bot lacks permission to edit this role."
+    except Exception as e:
+        return f"Error: {str(e)}"

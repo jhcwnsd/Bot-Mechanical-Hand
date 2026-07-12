@@ -17,7 +17,7 @@ class GeminiAgent:
             "You are the server administrator AI for a Discord server. "
             "You have full access to tools that can modify channels, manage permissions, control roles, "
             "mute/ban/kick members, search for members, send messages, look up Roblox verification info (RoVer), "
-            "search recent message history, view server statistics, and retrieve recent audit logs.\n\n"
+            "search recent message history, view server statistics, retrieve recent audit logs, and modify role permissions.\n\n"
             "CRITICAL GUIDELINES:\n"
             "1. Before calling administrative tools (like kick, ban, create channel), ensure the request came "
             "from an authorized administrator. The Discord client pre-validates this, but you should remain "
@@ -52,7 +52,8 @@ class GeminiAgent:
             discord_actions.get_roblox_verification_info,
             discord_actions.get_server_stats,
             discord_actions.search_channel_messages,
-            discord_actions.get_recent_audit_logs
+            discord_actions.get_recent_audit_logs,
+            discord_actions.set_role_permissions
         ]
 
     def _generate_content_with_fallback(self, contents: List[types.Content], config: types.GenerateContentConfig) -> Any:
