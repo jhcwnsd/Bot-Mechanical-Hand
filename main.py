@@ -90,7 +90,12 @@ async def on_message(message: discord.Message):
                 ai_response = await agent.process_message(prompt, context_info)
                 await message.channel.send(ai_response)
             except Exception as e:
-                await message.channel.send(f"❌ Failed to process request: {str(e)}")
+                err_msg = str(e).upper()
+                is_rate_limit = any(term in err_msg for term in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "QUOTA"])
+                if is_rate_limit:
+                    await message.channel.send("I am tired for today")
+                else:
+                    await message.channel.send(f"❌ Failed to process request: {str(e)}")
 
 if __name__ == "__main__":
     bot.run(Config.DISCORD_BOT_TOKEN)
