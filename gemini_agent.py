@@ -111,6 +111,16 @@ class GeminiAgent:
                     
         raise last_error
 
+    def _serialize_content(self, c: types.Content) -> str:
+        if hasattr(c, "model_dump_json"):
+            return c.model_dump_json()
+        return c.json()
+
+    def _deserialize_content(self, c_json: str) -> types.Content:
+        if hasattr(types.Content, "model_validate_json"):
+            return types.Content.model_validate_json(c_json)
+        return types.Content.parse_raw(c_json)
+
     async def process_message(self, prompt: str, context_info: dict) -> str:
         """
         Passes the prompt with guild context to Gemini, coordinates manual tool execution,
@@ -128,11 +138,8 @@ class GeminiAgent:
                 history_json = self.redis_client.get(f"chat:{channel_id}")
                 if history_json:
                     raw_list = json.loads(history_json)
-                    # Reconstruct Content objects safely supporting Pydantic v1/v2
-                    if hasattr(types.Content, "model_validate"):
-                        history = [types.Content.model_validate(c) for c in raw_list]
-                    else:
-                        history = [types.Content.parse_obj(c) for c in raw_list]
+                    # Reconstruct Content objects using native Pydantic validation
+                    history = [self._deserialize_content(c_json) for c_json in raw_list]
                     loaded_from_redis = True
                     print(f"[DEBUG] Loaded {len(history)} history turns from Redis.")
                 else:
@@ -227,11 +234,8 @@ class GeminiAgent:
         print(f"[DEBUG] Saving {len(history)} history turns back to database/cache.")
         if self.redis_client:
             try:
-                # Dump Content objects safely supporting Pydantic v1/v2
-                if hasattr(types.Content, "model_dump"):
-                    serializable_list = [c.model_dump() for c in history]
-                else:
-                    serializable_list = [c.dict() for c in history]
+                # Serialize each Content object using Pydantic's built-in JSON exporter (handles bytes -> base64 automatically)
+                serializable_list = [self._serialize_content(c) for c in history]
                 self.redis_client.set(f"chat:{channel_id}", json.dumps(serializable_list))
                 print(f"[DEBUG] Successfully saved to Redis for key chat:{channel_id}")
             except Exception as e:
