@@ -1,4 +1,7 @@
 import os
+import json
+import redis
+from config import Config
 from google import genai
 from google.genai import types
 import discord_actions
@@ -12,6 +15,15 @@ class GeminiAgent:
         # Store conversation history per channel ID
         # Format: Dict[int, List[types.Content]]
         self.chats: Dict[int, List[types.Content]] = {}
+        
+        # Initialize Redis database client if REDIS_URL is provided
+        self.redis_client = None
+        if Config.REDIS_URL:
+            try:
+                self.redis_client = redis.from_url(Config.REDIS_URL, decode_responses=True)
+                print("Successfully connected to Redis database.")
+            except Exception as e:
+                print(f"Warning: Failed to connect to Redis: {e}. Falling back to in-memory storage.")
         
         self.system_instruction = (
             "You are the Left Mechanical Hand, speaking and acting in the style of a cold, commanding, and "
@@ -106,11 +118,28 @@ class GeminiAgent:
         """
         channel_id = context_info["channel_id"]
         
-        # Initialize history list for this channel if not exists
-        if channel_id not in self.chats:
-            self.chats[channel_id] = []
+        # Load history from Redis if available, otherwise fall back to local RAM cache
+        history = []
+        loaded_from_redis = False
+        if self.redis_client:
+            try:
+                history_json = self.redis_client.get(f"chat:{channel_id}")
+                if history_json:
+                    raw_list = json.loads(history_json)
+                    # Reconstruct Content objects safely supporting Pydantic v1/v2
+                    if hasattr(types.Content, "model_validate"):
+                        history = [types.Content.model_validate(c) for c in raw_list]
+                    else:
+                        history = [types.Content.parse_obj(c) for c in raw_list]
+                    loaded_from_redis = True
+                    print(f"Loaded {len(history)} history turns from Redis.")
+            except Exception as e:
+                print(f"Error loading chat history from Redis: {e}")
         
-        history = self.chats[channel_id]
+        if not loaded_from_redis:
+            if channel_id not in self.chats:
+                self.chats[channel_id] = []
+            history = self.chats[channel_id]
 
         # Build context prefix to inform Gemini of the current guild context and request author
         context_prompt = (
@@ -185,9 +214,22 @@ class GeminiAgent:
         # Append the final model response (with the text answer) to history
         history.append(response.candidates[0].content)
 
-        # Keep history list under a reasonable size (e.g. keep last 40 turns to prevent token bloat)
+        # Keep history list under a reasonable size (e.g. keep last 80 turns to prevent token bloat)
         if len(history) > 80:
             history = history[-80:]
+
+        # Save history back to Redis or local memory
+        if self.redis_client:
+            try:
+                # Dump Content objects safely supporting Pydantic v1/v2
+                if hasattr(types.Content, "model_dump"):
+                    serializable_list = [c.model_dump() for c in history]
+                else:
+                    serializable_list = [c.dict() for c in history]
+                self.redis_client.set(f"chat:{channel_id}", json.dumps(serializable_list))
+            except Exception as e:
+                print(f"Error saving chat history to Redis: {e}")
+        else:
             self.chats[channel_id] = history
 
         return response.text

@@ -7,6 +7,7 @@ load_dotenv()
 class Config:
     DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    REDIS_URL = os.getenv("REDIS_URL")
 
     @classmethod
     def validate(cls):
