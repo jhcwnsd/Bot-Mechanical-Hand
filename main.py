@@ -44,17 +44,18 @@ async def on_message(message: discord.Message):
     is_mentioned = bot.user in message.mentions
 
     if is_mentioned or is_dm:
+        authorized = False
         allowed_roles = ["♕ 〖 Ruler 〗 ♕", "◈ 〖Undertaker Ruler's Right Hand〗 ◈"]
         if is_dm:
-            for guild in message.author.mutual_guilds:
+            for guild in bot.guilds:
                 member = guild.get_member(message.author.id)
                 if member:
                     for role in member.roles:
                         if role.name in allowed_roles:
                             authorized = True
                             break
-                    if authorized:
-                        break
+                if authorized:
+                    break
         else:
             author = message.guild.get_member(message.author.id)
             if author:
@@ -78,8 +79,9 @@ async def on_message(message: discord.Message):
             )
             return
 
+        default_guild_id = bot.guilds[0].id if bot.guilds else None
         context_info = {
-            "guild_id": message.guild.id if message.guild else None,
+            "guild_id": message.guild.id if message.guild else default_guild_id,
             "channel_id": message.channel.id,
             "author_id": message.author.id,
             "author_name": str(message.author),
