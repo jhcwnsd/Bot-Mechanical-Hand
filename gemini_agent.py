@@ -121,6 +121,8 @@ class GeminiAgent:
         # Load history from Redis if available, otherwise fall back to local RAM cache
         history = []
         loaded_from_redis = False
+        print(f"[DEBUG] process_message started. Redis client status: {self.redis_client is not None}")
+        
         if self.redis_client:
             try:
                 history_json = self.redis_client.get(f"chat:{channel_id}")
@@ -132,14 +134,17 @@ class GeminiAgent:
                     else:
                         history = [types.Content.parse_obj(c) for c in raw_list]
                     loaded_from_redis = True
-                    print(f"Loaded {len(history)} history turns from Redis.")
+                    print(f"[DEBUG] Loaded {len(history)} history turns from Redis.")
+                else:
+                    print(f"[DEBUG] No history found in Redis for key chat:{channel_id}")
             except Exception as e:
-                print(f"Error loading chat history from Redis: {e}")
+                print(f"[DEBUG] Error loading chat history from Redis: {e}")
         
         if not loaded_from_redis:
             if channel_id not in self.chats:
                 self.chats[channel_id] = []
             history = self.chats[channel_id]
+            print(f"[DEBUG] Loaded {len(history)} history turns from local RAM cache.")
 
         # Build context prefix to inform Gemini of the current guild context and request author
         context_prompt = (
@@ -218,7 +223,8 @@ class GeminiAgent:
         if len(history) > 80:
             history = history[-80:]
 
-        # Save history back to Redis or local memory
+        # Save history back to Redis and local memory
+        print(f"[DEBUG] Saving {len(history)} history turns back to database/cache.")
         if self.redis_client:
             try:
                 # Dump Content objects safely supporting Pydantic v1/v2
@@ -227,9 +233,11 @@ class GeminiAgent:
                 else:
                     serializable_list = [c.dict() for c in history]
                 self.redis_client.set(f"chat:{channel_id}", json.dumps(serializable_list))
+                print(f"[DEBUG] Successfully saved to Redis for key chat:{channel_id}")
             except Exception as e:
-                print(f"Error saving chat history to Redis: {e}")
-        else:
-            self.chats[channel_id] = history
+                print(f"[DEBUG] Error saving chat history to Redis: {e}")
+        
+        # Always maintain local cache copy as a secondary backup
+        self.chats[channel_id] = history
 
         return response.text
