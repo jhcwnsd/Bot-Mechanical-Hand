@@ -74,8 +74,8 @@ async def on_message(message: discord.Message):
 
         if not prompt:
             await message.channel.send(
-                f"Hello {message.author.display_name}! I am your Gemini AI Server Manager.\n"
-                "Ask me to manage channels, assign roles, kick/ban members, or view server lists."
+                f"Buonasera, {message.author.display_name}. I am the Consigliere of the Capofamiglia.\n"
+                "Tell me, how shall we handle the business of the famiglia today?"
             )
             return
 
