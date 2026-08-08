@@ -51,7 +51,12 @@ class VixonApp:
             "- You can execute system commands on the user's Windows PC to help them build, run, test, or organize files.\n"
             "- To run a command, you must output the command wrapped inside <run_command>your_command_here</run_command> tags.\n"
             "- When requesting a command, output ONLY your <thinking>...</thinking> block and the <run_command>...</run_command> tag. "
-            "Do not write conversational text alongside command requests. Wait for the terminal execution results first."
+            "Do not write conversational text alongside command requests. Wait for the terminal execution results first.\n\n"
+            "WEB SEARCH TOOL:\n"
+            "- You have a read-only web search tool to lookup information, research concepts, or learn things from the internet.\n"
+            "- To search the web, you must output the query wrapped inside <web_search>your_search_query_here</web_search> tags.\n"
+            "- When requesting a search, output ONLY your <thinking>...</thinking> block and the <web_search>...</web_search> tag. "
+            "Do not write conversational text. The search results will be fed back into your context automatically."
         )
         
         self.gui_queue = queue.Queue()
@@ -697,6 +702,15 @@ class VixonApp:
         if thinking_content:
             self.gui_queue.put(("thought", thinking_content))
             
+        # Check if model requested an autonomous web search
+        search_match = re.search(r'<web_search>(.*?)</web_search>', response_text, re.DOTALL)
+        if search_match:
+            search_query = search_match.group(1).strip()
+            self._save_chat_message("assistant", response_text)
+            self.current_messages.append({"role": "assistant", "content": response_text})
+            threading.Thread(target=self._run_autonomous_search_tool, args=(search_query,), daemon=True).start()
+            return
+
         match = re.search(r'<run_command>(.*?)</run_command>', response_text, re.DOTALL)
         if match:
             cmd = match.group(1).strip()
@@ -709,6 +723,27 @@ class VixonApp:
             
             # Combine background checks using the full response text so Vixon can learn from thoughts
             threading.Thread(target=self._run_background_checks, args=(response_text,), daemon=True).start()
+
+    def _run_autonomous_search_tool(self, search_query):
+        self.gui_queue.put(("log", f"Vixon requested web search: '{search_query}'..."))
+        search_context = ""
+        try:
+            with DDGS() as ddgs:
+                results = [r["body"] for r in ddgs.text(search_query, max_results=4)]
+            if results:
+                search_context = f"\n\n[Web Search Results for '{search_query}']:\n" + "\n".join([f"- {r}" for r in results])
+                self.gui_queue.put(("log", "Search completed. Context loaded."))
+            else:
+                search_context = f"\n\n[Web Search Results for '{search_query}']:\nNo results found."
+                self.gui_queue.put(("log", "Search completed. No results found."))
+        except Exception as e:
+            search_context = f"\n\n[Web Search Results for '{search_query}']:\nError: {e}"
+            self.gui_queue.put(("log", f"Search tool failed: {e}"))
+            
+        # Append the results back to the conversation as a user prompt and re-run the Ollama turn
+        self.current_messages.append({"role": "user", "content": search_context})
+        self._save_chat_message("user", search_context)
+        self._run_ollama_turn()
 
     def _run_background_checks(self, response_text):
         try:
