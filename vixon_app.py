@@ -384,7 +384,6 @@ class VixonApp:
                     self._write_chat("thought", f"🧠 [Vixon Thought Process]\n{content}")
                 elif msg_type == "response":
                     self._write_chat("ai", f"{self.ai_name}: {content}")
-                    self._enable_controls()
                     self._refresh_memories()
                 elif msg_type == "log":
                     self._log_event(content)
@@ -415,8 +414,7 @@ class VixonApp:
         self.input_entry.delete(0, tk.END)
         self._write_chat("user", f"You: {text}")
         
-        self.send_btn.configure(state=tk.DISABLED)
-        self.input_entry.configure(state=tk.DISABLED)
+        # We no longer disable input_entry or send_btn here to allow queuing messages.
         
         threading.Thread(target=self._query_pipeline_thread, args=(text,), daemon=True).start()
 
@@ -626,8 +624,6 @@ class VixonApp:
             return
             
         self.study_entry.delete(0, tk.END)
-        self.send_btn.configure(state=tk.DISABLED)
-        self.input_entry.configure(state=tk.DISABLED)
         
         threading.Thread(target=self._run_study_thread, args=(topic,), daemon=True).start()
 
@@ -638,12 +634,10 @@ class VixonApp:
                 results = [r["body"] for r in ddgs.text(topic, max_results=3)]
         except Exception as e:
             self.gui_queue.put(("log", f"Study search failed: {e}"))
-            self.root.after(0, self._enable_controls)
             return
             
         if not results:
             self.gui_queue.put(("log", "No results found to study."))
-            self.root.after(0, self._enable_controls)
             return
             
         formatted_results = "\n".join([f"- {r}" for r in results])
@@ -682,12 +676,6 @@ class VixonApp:
                 self.gui_queue.put(("learned", note))
         except Exception as e:
             self._log_event(f"Failed study notes saving: {e}")
-            
-        self.root.after(0, self._enable_controls)
-
-    def _enable_controls(self):
-        self.send_btn.configure(state=tk.NORMAL)
-        self.input_entry.configure(state=tk.NORMAL)
 
 if __name__ == "__main__":
     db_path = "personal_brain.db"
