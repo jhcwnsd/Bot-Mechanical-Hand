@@ -52,6 +52,7 @@ class VixonApp:
         self.command_pending = False
         self.current_messages = []
         self.original_user_prompt = ""
+        self.deep_study_var = tk.BooleanVar(value=False)
         
         self._init_db()
         self._load_settings()
@@ -236,10 +237,18 @@ class VixonApp:
         )
         self.study_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
         
+        self.deep_cb = ctk.CTkCheckBox(
+            self.study_tool_frame, text="DEEP", variable=self.deep_study_var,
+            font=("Consolas", 9, "bold"), text_color="#FF4D4D",
+            fg_color="#B51D29", border_color="#2E2E33", hover_color="#8F141E",
+            width=55
+        )
+        self.deep_cb.pack(side=tk.LEFT, padx=(0, 5))
+        
         self.study_btn = ctk.CTkButton(
             self.study_tool_frame, text="STUDY", font=("Consolas", 10, "bold"),
             fg_color="#1E1E1E", border_color="#C82333", border_width=1,
-            text_color="#FF4D4D", hover_color="#C82333", width=65,
+            text_color="#FF4D4D", hover_color="#C82333", width=55,
             command=self._trigger_self_study
         )
         self.study_btn.pack(side=tk.RIGHT)
@@ -628,10 +637,13 @@ class VixonApp:
             
         self.study_entry.delete(0, tk.END)
         
-        # Support comma-separated topics for concurrent study threads
+        is_deep = self.deep_study_var.get()
         topics = [t.strip() for t in topic_text.split(",") if t.strip()]
         for t in topics:
-            threading.Thread(target=self._run_study_thread, args=(t,), daemon=True).start()
+            if is_deep:
+                threading.Thread(target=self._run_deep_study_thread, args=(t,), daemon=True).start()
+            else:
+                threading.Thread(target=self._run_study_thread, args=(t,), daemon=True).start()
 
     def _run_study_thread(self, topic):
         self.gui_queue.put(("log", f"Self-Study: Researching '{topic}'..."))
@@ -686,6 +698,120 @@ class VixonApp:
                     self.gui_queue.put(("learned", line))
         except Exception as e:
             self._log_event(f"Failed study notes saving for '{topic}': {e}")
+
+    def _run_deep_study_thread(self, topic):
+        self.gui_queue.put(("log", f"Initializing Deep Dive Research on '{topic}'..."))
+        
+        # Step 1: Initial search
+        try:
+            with DDGS() as ddgs:
+                initial_results = [r["body"] for r in ddgs.text(topic, max_results=3)]
+        except Exception as e:
+            self.gui_queue.put(("log", f"Deep Dive failed for '{topic}': Initial search error: {e}"))
+            return
+            
+        if not initial_results:
+            self.gui_queue.put(("log", f"Deep Dive: No initial results for '{topic}'."))
+            return
+            
+        # Step 2: Ask Vixon's brain to extract 3 sub-topics
+        formatted_initial = "\n".join([f"- {r}" for r in initial_results])
+        subtopic_prompt = (
+            f"Review these search results about '{topic}':\n{formatted_initial}\n\n"
+            "What are the 3 most important sub-topics, names, or key terms mentioned that deserve separate search queries to research deeper? "
+            "Reply with ONLY the 3 sub-topics, one per line. No numbers, no bullet characters, no extra words."
+        )
+        
+        payload = {
+            "model": self.model_name,
+            "messages": [{"role": "user", "content": subtopic_prompt}],
+            "stream": False,
+            "options": {"temperature": 0.3, "num_predict": 80}
+        }
+        
+        subtopics = []
+        try:
+            headers = {"Content-Type": "application/json"}
+            req = urllib.request.Request(self.ollama_url, data=json.dumps(payload).encode('utf-8'), headers=headers)
+            with urllib.request.urlopen(req) as resp:
+                resp_text = json.loads(resp.read().decode('utf-8'))["message"]["content"].strip()
+                
+            for line in resp_text.split("\n"):
+                line = line.strip().lstrip("-*• 123. ").strip()
+                if line and len(line) > 3:
+                    subtopics.append(line)
+        except Exception as e:
+            self.gui_queue.put(("log", f"Sub-topic extraction failed: {e}"))
+            
+        if not subtopics:
+            subtopics = [f"{topic} history", f"{topic} rules", f"{topic} details"]
+            
+        self.gui_queue.put(("log", f"Extracted sub-topics: {', '.join(subtopics)}. Searching concurrently..."))
+        
+        # Step 3: Concurrently search for each sub-topic
+        all_web_context = list(initial_results)
+        
+        def search_worker(sub_t):
+            try:
+                with DDGS() as ddgs:
+                    res = [r["body"] for r in ddgs.text(sub_t, max_results=2)]
+                    all_web_context.extend(res)
+            except Exception as e:
+                self.gui_queue.put(("log", f"Search error for '{sub_t}': {e}"))
+                
+        threads = []
+        for st in subtopics[:3]:
+            t = threading.Thread(target=search_worker, args=(st,))
+            t.start()
+            threads.append(t)
+            
+        for t in threads:
+            t.join()
+            
+        # Step 4: Final extraction of 8-10 dense bullets
+        self.gui_queue.put(("log", f"Compiling data and extracting deep knowledge..."))
+        formatted_all = "\n".join([f"- {r}" for r in all_web_context])
+        
+        deep_prompt = (
+            f"You are Vixon. You are compiling deep research about '{topic}'.\n"
+            f"Here is all the compiled web search data we gathered:\n{formatted_all}\n\n"
+            "Extract 8 to 10 highly detailed, distinct factual notes or historical lessons from this research. "
+            "Write them in the third person, keeping each note to a single concise sentence. "
+            "Return ONLY the notes, one per line. No numbers, no bullet signs."
+        )
+        
+        payload_deep = {
+            "model": self.model_name,
+            "messages": [{"role": "user", "content": deep_prompt}],
+            "stream": False,
+            "options": {
+                "temperature": 0.5,
+                "num_predict": 400
+            }
+        }
+        
+        try:
+            req = urllib.request.Request(self.ollama_url, data=json.dumps(payload_deep).encode('utf-8'), headers=headers)
+            with urllib.request.urlopen(req) as resp:
+                deep_response = json.loads(resp.read().decode('utf-8'))["message"]["content"].strip()
+                
+            saved_count = 0
+            for line in deep_response.split("\n"):
+                line = line.strip().lstrip("-*• ").strip()
+                if line and len(line) > 10:
+                    with self.db_lock:
+                        with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                            cursor = conn.cursor()
+                            cursor.execute(
+                                "INSERT INTO memories (content, timestamp, strength, last_used) VALUES (?, ?, 1.0, ?)",
+                                (line, datetime.now().isoformat(), datetime.now().isoformat())
+                            )
+                            conn.commit()
+                    self.gui_queue.put(("learned", line))
+                    saved_count += 1
+            self.gui_queue.put(("log", f"Deep study complete. Logged {saved_count} new facts on '{topic}'."))
+        except Exception as e:
+            self._log_event(f"Failed deep study saving for '{topic}': {e}")
 
 if __name__ == "__main__":
     db_path = "personal_brain.db"
