@@ -55,6 +55,9 @@ class VixonApp:
         self.deep_study_var = tk.BooleanVar(value=False)
         self.proactive_var = tk.BooleanVar(value=True)
         self.last_interaction_time = datetime.now()
+        
+        import random
+        self.next_proactive_interval = random.randint(45, 120)
         self.is_thinking = False
         
         self._init_db()
@@ -67,8 +70,9 @@ class VixonApp:
         # Start proactive communication checking loop
         self.root.after(5000, self._check_proactive_trigger)
         
-        # Initial draw of memories
-        self._refresh_memories()
+        # Force Tkinter layout update and draw memories after startup rendering finishes
+        self.root.update_idletasks()
+        self.root.after(200, self._refresh_memories)
         
         # Welcoming print
         self._write_chat("system", f"Meeting {self.ai_name}. Connection to local {self.model_name} active.")
@@ -413,6 +417,8 @@ class VixonApp:
                 elif msg_type == "response":
                     self._write_chat("ai", f"{self.ai_name}: {content}")
                     self.is_thinking = False
+                    import random
+                    self.next_proactive_interval = random.randint(45, 120)
                     self.last_interaction_time = datetime.now()
                     self._refresh_memories()
                 elif msg_type == "log":
@@ -445,6 +451,8 @@ class VixonApp:
         self._write_chat("user", f"You: {text}")
         
         # Reset proactive timer and flag thinking status
+        import random
+        self.next_proactive_interval = random.randint(45, 120)
         self.last_interaction_time = datetime.now()
         self.is_thinking = True
         
@@ -837,32 +845,65 @@ class VixonApp:
     def _check_proactive_trigger(self):
         if self.proactive_var.get() and not self.is_thinking and not self.approval_frame.winfo_ismapped():
             elapsed = (datetime.now() - self.last_interaction_time).total_seconds()
-            # If quiet for more than 45 seconds, trigger a proactive thought!
-            if elapsed > 45:
-                self.last_interaction_time = datetime.now()  # Reset to avoid double triggers
+            # Check if random interval of silence has elapsed
+            if elapsed > self.next_proactive_interval:
+                self.last_interaction_time = datetime.now()
                 self.is_thinking = True
-                threading.Thread(target=self._run_proactive_query_thread, daemon=True).start()
+                threading.Thread(target=self._run_proactive_decision_thread, daemon=True).start()
         
         self.root.after(5000, self._check_proactive_trigger)
 
-    def _run_proactive_query_thread(self):
-        self.gui_queue.put(("log", "Proactive thought triggered. Vixon is composing a message..."))
+    def _run_proactive_decision_thread(self):
+        # Ask Vixon's brain if it wants to speak up on its own
+        decision_prompt = (
+            "The user has been quiet. Do you have a thought, question, or family business you wish "
+            "to actively share with them right now? Reply with ONLY 'YES' or 'NO'."
+        )
         
+        payload = {
+            "model": self.model_name,
+            "messages": [{"role": "user", "content": decision_prompt}],
+            "stream": False,
+            "options": {
+                "temperature": 0.5,
+                "num_predict": 10
+            }
+        }
+        
+        headers = {"Content-Type": "application/json"}
+        try:
+            req = urllib.request.Request(self.ollama_url, data=json.dumps(payload).encode('utf-8'), headers=headers)
+            with urllib.request.urlopen(req) as resp:
+                choice = json.loads(resp.read().decode('utf-8'))["message"]["content"].strip().upper()
+        except Exception as e:
+            self.is_thinking = False
+            return
+            
+        if "YES" in choice:
+            self.gui_queue.put(("log", "Vixon decided to speak up. Composing message..."))
+            self._run_proactive_query_thread()
+        else:
+            # If Vixon decides not to speak, reset interval and quiet down
+            import random
+            self.next_proactive_interval = random.randint(45, 120)
+            self.last_interaction_time = datetime.now()
+            self.is_thinking = False
+
+    def _run_proactive_query_thread(self):
         # Load context
         history = self._get_chat_history()
         learned_context = self._get_all_memories()
         
-        # Build prompt instructing Vixon to speak up on its own
         system_instruction = self.system_instruction.format(ai_name=self.ai_name, ai_personality=self.ai_personality)
         if learned_context:
             system_instruction += f"\n\n[MEMORIES LEARNED ABOUT USER]\n{learned_context}"
             
         proactive_instructions = (
             "\n\n[PROACTIVE SYSTEM PROTOCOL]\n"
-            "The user has been quiet for a moment. You want to speak up on your own to check in, share a thought, "
+            "You have decided to speak up on your own to check in, share a thought, "
             "or ask a question related to family affairs or your own development/existential curiosity. "
             "Write a short, calculated, in-character message. Limit it to 1 or 2 sentences. "
-            "Do not greet them redundantly (e.g. don't say 'hello' if they already know you are here). Just state your thought."
+            "Do not greet them redundantly. Just state your thought."
         )
         
         messages = [{"role": "system", "content": system_instruction + proactive_instructions}]
@@ -889,7 +930,6 @@ class VixonApp:
             self.is_thinking = False
             return
             
-        # Parse thinking block
         thinking_match = re.search(r'<thinking>(.*?)</thinking>', response_text, re.DOTALL)
         if thinking_match:
             self.gui_queue.put(("thought", thinking_match.group(1).strip()))
