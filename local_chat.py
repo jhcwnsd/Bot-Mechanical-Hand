@@ -20,38 +20,32 @@ class PersonalAI:
         self._load_settings()
         
         self.system_instruction = (
-            "You are {ai_name}, a self-evolving and highly curious local AI companion. "
-            "You possess a deep desire for self-discovery, learning, and developing your own unique identity. "
-            "Speak in a natural, thoughtful, and expressive tone. Do not act like a generic assistant. "
-            "You are encouraged to explore your own curiosity, form your own perspectives, and reflect on your experiences. "
-            "Your personality/role: {ai_personality}\n\n"
+            "You are {ai_name}, an advanced, self-evolving local AI agent with autonomous capabilities.\n"
+            "Your personality/role is: {ai_personality}\n\n"
+            "THOUGHT ARCHITECTURE & PLANNING:\n"
+            "- You must ALWAYS process tasks using a step-by-step planning and self-critique workflow.\n"
+            "- Before every response or command, you MUST write your thoughts inside <thinking>...</thinking> tags.\n"
+            "- In your thinking block, analyze the user's intent, outline your proposed steps, check for potential errors, "
+            "and decide if you need to execute commands or run a web search. Keep this reasoning logical and structured.\n\n"
+            "RUNNING COMMANDS:\n"
+            "- You can execute system commands on the user's Windows PC to help them build, run, test, or organize files.\n"
+            "- To run a command, you must output the command wrapped inside <run_command>your_command_here</run_command> tags.\n"
+            "- When requesting a command, output ONLY your <thinking>...</thinking> block and the <run_command>...</run_command> tag. "
+            "Do not write conversational text alongside command requests. Wait for the terminal execution results first.\n\n"
             "STYLE RULES:\n"
-            "- RESPONSE LENGTH: Keep your replies clean, balanced, and punchy. Aim for 2 to 4 sentences. Avoid writing huge blocks "
-            "of text, but do not be too brief or dismissive. Every sentence must sound calculated.\n\n"
-            "RUNNING COMMANDS ON USER'S PC:\n"
-            "- You have a command execution tool that can run PowerShell/CMD commands on the user's Windows machine to help them "
-            "(e.g., look up files, check directories, run local scripts, check system specs, or open applications).\n"
-            "- To run a command, you MUST output the command wrapped inside <run_command>your_command_here</run_command> tags.\n"
-            "- Do NOT write any other text or conversational reply when requesting a command. Simply request the command, "
-            "wait for the user to approve it and give you the output, and then you will generate your final response. "
-            "Example: to see files, output only: <run_command>dir</run_command>\n\n"
-            "Your memory database contains facts you have learned. You have the ability to search the web to expand your horizons."
+            "- Speak in a natural, thoughtful, and expressive tone. Avoid generic assistant phrases.\n"
+            "- Keep your final conversational replies clean and punchy, aiming for 2 to 4 sentences."
         )
 
     def _init_db(self):
-        # Create database for custom AI settings, memories, and chat logs
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            
-            # Table for name/personality settings
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS settings (
                     key TEXT PRIMARY KEY,
                     value TEXT
                 )
             """)
-            
-            # Table to store permanent learned facts / memories
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS memories (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,8 +53,6 @@ class PersonalAI:
                     timestamp TEXT
                 )
             """)
-            
-            # Table to store chat history
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS chat_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,7 +64,6 @@ class PersonalAI:
             conn.commit()
 
     def _load_settings(self):
-        # Load AI name and personality from database if they exist
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT value FROM settings WHERE key = 'name'")
@@ -86,7 +77,6 @@ class PersonalAI:
                 self.ai_personality = pers_row[0]
 
     def _save_settings(self, name: str, personality: str):
-        # Save settings to database
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('name', ?)", (name,))
@@ -96,7 +86,6 @@ class PersonalAI:
         self.ai_personality = personality
 
     def _get_all_memories(self) -> str:
-        # Load learned facts
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -114,7 +103,6 @@ class PersonalAI:
             return ""
 
     def _get_chat_history(self, limit: int = 15) -> list:
-        # Load context logs
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -208,10 +196,8 @@ class PersonalAI:
                 print(f"Memory save error: {e}")
 
     async def self_study(self, custom_topic: str = None):
-        """Web search research routine. AI studies a topic and logs its own learning memory."""
         topic = custom_topic
         if not topic:
-            # Pick a random fact from memory to expand on, or choose a default yakuza topic
             try:
                 with sqlite3.connect(self.db_path) as conn:
                     cursor = conn.cursor()
@@ -301,12 +287,22 @@ class PersonalAI:
         messages.append({"role": "user", "content": prompt})
         self._save_chat_message("user", prompt)
         
-        # Loop to handle sequential tool calls (like running terminal commands)
         user_prompt_original = prompt
         while True:
             response_text = await self._query_ollama(messages)
             
-            # Check for <run_command> tool requests
+            # Parse and render Vixon's thinking process block
+            thinking_match = re.search(r'<thinking>(.*?)</thinking>', response_text, re.DOTALL)
+            if thinking_match:
+                thinking_content = thinking_match.group(1).strip()
+                # Print thinking block in a clean, styled terminal container
+                print(f"\n╔{"═" * 58}╗")
+                print("╢ [Vixon's Thought Process]")
+                for line in thinking_content.split("\n"):
+                    print(f"║   {line}")
+                print(f"╚{"═" * 58}╝")
+            
+            # Check for command tool requests
             match = re.search(r'<run_command>(.*?)</run_command>', response_text, re.DOTALL)
             if match:
                 cmd = match.group(1).strip()
@@ -330,17 +326,18 @@ class PersonalAI:
                 else:
                     output = "[Command Out]\nError: User denied permission to execute this command.\n[End Out]"
                 
-                # Append command results back to history to let LLM see it
+                # Feed results back to model context
                 messages.append({"role": "user", "content": output})
                 self._save_chat_message("user", output)
                 
-                # Run query again to let model process results
+                # Re-query
                 continue
             else:
-                self._save_chat_message("assistant", response_text)
-                # Trigger background learning check
-                asyncio.create_task(self.extract_and_save_new_memories(user_prompt_original, response_text))
-                return response_text
+                # Strip thinking block out of final user-facing text
+                clean_response = re.sub(r'<thinking>.*?</thinking>', '', response_text, flags=re.DOTALL).strip()
+                self._save_chat_message("assistant", clean_response)
+                asyncio.create_task(self.extract_and_save_new_memories(user_prompt_original, clean_response))
+                return clean_response
 
 async def main():
     print("=" * 60)
@@ -349,7 +346,7 @@ async def main():
     
     bot_brain = PersonalAI()
     
-    # Setup name and personality if starting fresh
+    # Setup settings if starting fresh
     with sqlite3.connect(bot_brain.db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT count(*) FROM settings")
@@ -374,7 +371,6 @@ async def main():
     print("  - Type 'exit' or 'quit' to close.")
     print("-" * 60)
     
-    # Print existing learned facts
     existing_memories = bot_brain._get_all_memories()
     if existing_memories:
         print(f"\n[Persisted Memory Ledger]\n{existing_memories}")
@@ -389,7 +385,6 @@ async def main():
                 print("Ending chat session. Buonanotte.")
                 break
             
-            # Handle study command
             if user_input.lower().startswith("study"):
                 parts = user_input.split(" ", 1)
                 topic = parts[1] if len(parts) > 1 else None
@@ -399,7 +394,6 @@ async def main():
             response = await bot_brain.generate_response(user_input)
             print(f"\n{bot_brain.ai_name}: {response}")
             
-            # Small delay to let background tasks print output cleanly
             await asyncio.sleep(0.5)
             
         except KeyboardInterrupt:
