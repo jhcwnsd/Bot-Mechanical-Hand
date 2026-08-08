@@ -10,7 +10,7 @@ class LocalAgent:
         self.ollama_url = "http://localhost:11434/api/chat"
         self.model_name = "llama3.1"
         
-        # Initialize SQLite database
+        # Setup local db
         self._init_db()
         
         self.system_instruction = (
@@ -35,21 +35,19 @@ class LocalAgent:
         )
 
     def _init_db(self):
-        """Initializes the local SQLite database for chat logs and learned memories."""
+        # Create SQLite tables for conversation history and learned facts
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
-            # Table to store permanent learned facts / memories
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS memories (
-                    id INTEGER PRIMARY KEY AUTOVT_INCREMENT,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id TEXT,
                     content TEXT,
                     timestamp TEXT
                 )
             """)
             
-            # Table to store raw chat logs for context history
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS chat_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,21 +57,10 @@ class LocalAgent:
                     timestamp TEXT
                 )
             """)
-            
-            # Fix AUTOINCREMENT syntax error (AUTOVT_INCREMENT was a typo in memories)
-            cursor.execute("DROP TABLE IF EXISTS memories")
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS memories (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id TEXT,
-                    content TEXT,
-                    timestamp TEXT
-                )
-            """)
             conn.commit()
 
     def _get_all_memories(self) -> str:
-        """Retrieves all dynamically learned family memories to inject into LLM system context."""
+        # Load permanent ledger facts to inject into AI context
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -87,11 +74,11 @@ class LocalAgent:
                     memories_str += f"- {row[0]}\n"
                 return memories_str
         except Exception as e:
-            print(f"[DEBUG] Error retrieving memories from SQLite: {e}")
+            print(f"Error loading ledger memories: {e}")
             return ""
 
     def _get_chat_history(self, channel_id: str, limit: int = 10) -> list:
-        """Loads recent chat history from SQLite database to maintain conversation context."""
+        # Load recent context history for the channel
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -100,15 +87,13 @@ class LocalAgent:
                     (channel_id, limit)
                 )
                 rows = cursor.fetchall()
-                # Reverse to get chronological order
-                history = [{"role": row[0], "content": row[1]} for row in reversed(rows)]
-                return history
+                return [{"role": row[0], "content": row[1]} for row in reversed(rows)]
         except Exception as e:
-            print(f"[DEBUG] Error retrieving chat history from SQLite: {e}")
+            print(f"Error loading history: {e}")
             return []
 
     def _save_chat_message(self, channel_id: str, role: str, content: str):
-        """Saves a single turn of conversation to the SQLite history table."""
+        # Save message logs to database
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -118,10 +103,10 @@ class LocalAgent:
                 )
                 conn.commit()
         except Exception as e:
-            print(f"[DEBUG] Error saving chat message to SQLite: {e}")
+            print(f"Error saving log: {e}")
 
     async def _query_ollama(self, messages: list) -> str:
-        """Helper to query the local Ollama API server using async non-blocking HTTP request."""
+        # Send HTTP request to local Ollama API
         payload = {
             "model": self.model_name,
             "messages": messages,
@@ -138,16 +123,13 @@ class LocalAgent:
                         result = await resp.json()
                         return result["message"]["content"]
                     else:
-                        raise Exception(f"Ollama API returned status code {resp.status}")
+                        raise Exception(f"Ollama returned error: {resp.status}")
             except Exception as e:
-                print(f"[DEBUG] Error querying local Ollama: {e}")
+                print(f"Ollama connection error: {e}")
                 return "Mi dispiace, amico mio. I am experiencing a temporary cloud in my thoughts. Let us speak again in a moment."
 
     async def extract_and_save_new_memories(self, user_id: str, user_prompt: str, bot_response: str):
-        """
-        Background task: Asks the LLM to inspect the turn for new facts/rules and saves them.
-        This enables the 'self-learning' behavior without heavy file re-training.
-        """
+        # Background routine to analyze chat for new facts/instructions
         reflection_prompt = (
             "You are an analytical system observer. Inspect the following exchange between the User and the Assistant.\n"
             "Determine if the user has revealed any new personal preferences, names, rules, syndicate members, or instructions.\n"
@@ -158,19 +140,16 @@ class LocalAgent:
             f"Assistant: {bot_response}"
         )
         
-        messages = [
-            {"role": "user", "content": reflection_prompt}
-        ]
+        messages = [{"role": "user", "content": reflection_prompt}]
         
-        print("[DEBUG] Running self-reflection learning check...")
+        print("Checking for new facts...")
         reflection_result = await self._query_ollama(messages)
         reflection_result = reflection_result.strip()
         
         if "NONE" in reflection_result or not reflection_result:
-            print("[DEBUG] No new memories extracted from this exchange.")
+            print("No new facts learned.")
             return
         
-        # Split into bullet points or lines and store them
         new_facts = []
         for line in reflection_result.split("\n"):
             line = line.strip().lstrip("-*• ").strip()
@@ -186,52 +165,46 @@ class LocalAgent:
                             "INSERT INTO memories (user_id, content, timestamp) VALUES (?, ?, ?)",
                             (user_id, fact, datetime.now().isoformat())
                         )
-                        print(f"[DEBUG] Dynamic Memory Learned: {fact}")
+                        print(f"Memory Saved: {fact}")
                     conn.commit()
             except Exception as e:
-                print(f"[DEBUG] Error writing new memories to SQLite: {e}")
+                print(f"Memory save error: {e}")
 
     async def process_message(self, prompt: str, context_info: dict) -> str:
-        """Processes user input, queries the local model with context/history, and returns response."""
+        # Handle chat query pipeline
         channel_id = str(context_info["channel_id"])
         user_id = str(context_info["author_id"])
         
-        # 1. Load chat history
+        # Load history
         history = self._get_chat_history(channel_id, limit=8)
         
-        # 2. Get dynamic learned memories
+        # Load dynamic context
         learned_context = self._get_all_memories()
         
-        # 3. Build system instruction with dynamic memories injected
         full_system_instruction = self.system_instruction
         if learned_context:
             full_system_instruction += f"\n\n[MEMORIES FROM CURRENT LEDGER]\n{learned_context}"
         
-        # 4. Construct messages payload for Ollama
+        # Format payload
         messages = [{"role": "system", "content": full_system_instruction}]
         
-        # Append history
         for msg in history:
             messages.append({"role": msg["role"], "content": msg["content"]})
             
-        # Append current user prompt
         user_prompt_with_context = (
             f"[User Context: {context_info['author_name']} (ID: {user_id})]\n"
             f"{prompt}"
         )
         messages.append({"role": "user", "content": user_prompt_with_context})
         
-        # 5. Save user message to database history
         self._save_chat_message(channel_id, "user", user_prompt_with_context)
         
-        # 6. Query local Ollama model
-        print(f"[DEBUG] Processing local chat query for channel {channel_id}...")
+        print(f"Querying Ollama for channel {channel_id}...")
         response_text = await self._query_ollama(messages)
         
-        # 7. Save assistant response to database history
         self._save_chat_message(channel_id, "assistant", response_text)
         
-        # 8. Trigger self-reflection learning loop asynchronously
+        # Trigger self-learning check in background
         import asyncio
         asyncio.create_task(self.extract_and_save_new_memories(user_id, prompt, response_text))
         
