@@ -88,7 +88,7 @@ class VixonApp:
         
         # Force Tkinter layout update and draw memories after startup rendering finishes
         self.root.update_idletasks()
-        self.root.after(200, self._refresh_memories)
+        self.root.after(200, self._async_refresh_memories)
         
         # Welcoming print
         self._write_chat("system", f"Meeting {self.ai_name}. Connection to local {self.model_name} active.")
@@ -420,13 +420,21 @@ class VixonApp:
         self.chat_area.see(tk.END)
         self.chat_area.configure(state=tk.DISABLED)
 
-    def _refresh_memories(self):
+    def _async_refresh_memories(self):
+        def query_db():
+            try:
+                with self.db_lock:
+                    with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT id, content, strength, pinned FROM memories ORDER BY id DESC")
+                        rows = cursor.fetchall()
+                self.gui_queue.put(("memories_data", rows))
+            except Exception as e:
+                self.gui_queue.put(("log", f"Database query failed: {e}"))
+        threading.Thread(target=query_db, daemon=True).start()
+
+    def _draw_memories_cards(self, rows):
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT id, content, strength, pinned FROM memories ORDER BY id DESC")
-                rows = cursor.fetchall()
-                
             # Clear old widgets in memory panel
             for w in self.mem_scroll_frame.winfo_children():
                 w.destroy()
@@ -509,7 +517,7 @@ class VixonApp:
                     cursor.execute(f"DELETE FROM memories WHERE id IN ({placeholders})", selected_ids)
                     conn.commit()
             self._log_event(f"Deleted {len(selected_ids)} memories from database.")
-            self._refresh_memories()
+            self._async_refresh_memories()
         except Exception as e:
             self._log_event(f"Failed to delete selected memories: {e}")
 
@@ -527,7 +535,7 @@ class VixonApp:
                     cursor.execute(f"UPDATE memories SET pinned = 1, strength = 1.0 WHERE id IN ({placeholders})", selected_ids)
                     conn.commit()
             self._log_event(f"Pinned/Saved {len(selected_ids)} memories. They are now safe from decay.")
-            self._refresh_memories()
+            self._async_refresh_memories()
         except Exception as e:
             self._log_event(f"Failed to pin selected memories: {e}")
 
@@ -545,7 +553,7 @@ class VixonApp:
                     cursor.execute(f"UPDATE memories SET pinned = 0 WHERE id IN ({placeholders})", selected_ids)
                     conn.commit()
             self._log_event(f"Unpinned {len(selected_ids)} memories. They will now decay normally.")
-            self._refresh_memories()
+            self._async_refresh_memories()
         except Exception as e:
             self._log_event(f"Failed to unpin selected memories: {e}")
 
@@ -577,18 +585,20 @@ class VixonApp:
                     import random
                     self.next_proactive_interval = random.randint(45, 120)
                     self.last_interaction_time = datetime.now()
-                    self._refresh_memories()
+                    self._async_refresh_memories()
                 elif msg_type == "log":
                     self._log_event(content)
                 elif msg_type == "learned":
                     self._write_chat("learned", f"✨ Vixon learned fact: {content}")
-                    self._refresh_memories()
+                    self._async_refresh_memories()
                 elif msg_type == "forgot":
                     self._write_chat("thought", f"🗑️ Vixon forgot decayed fact: {content}")
-                    self._refresh_memories()
+                    self._async_refresh_memories()
                 elif msg_type == "reinforced":
                     self._write_chat("learned", f"⚡ Memory reinforced: {content}")
-                    self._refresh_memories()
+                    self._async_refresh_memories()
+                elif msg_type == "memories_data":
+                    self._draw_memories_cards(content)
                 elif msg_type == "command_request":
                     self.current_command = content
                     self.approval_lbl.configure(text=f"⚠️ Execute CMD: {content}")
