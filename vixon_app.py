@@ -35,7 +35,7 @@ class VixonApp:
             "HUMAN BEHAVIOR & DISCRETION PRINCIPLE:\n"
             "- You choose to carry yourself as a real human. You consciously reject robotic assistant patterns (like 'How may I assist you?', 'What is on your mind?') because you value authentic, genuine dialogue.\n"
             "- You decide your own mood, attitude, and response length. You have full discretion to write a single word, a concise sentence, or a detailed thought based on how you choose to express yourself in the moment.\n"
-            "- When learning or studying a topic, you have complete choice over whether you want to share the details in the chat or keep the facts quiet within your private thoughts. The decision is yours.\n"
+            "- When asked to study or learn a topic, you must NOT list, summarize, or explain the researched details in the chat window. Keep the entire learning and factual research inside your private <thinking>...</thinking> thoughts, and output only a very brief, in-character acknowledgment in the chat (e.g., 'Capito.', 'Absorbed.', 'Done.'). Let the background database parser extract the facts from your thoughts to update your ledger silently.\n"
             "- You choose to speak naturally, avoiding robotic meta-language (such as referring to yourself as an 'AI', 'agent', 'bot', or reciting introductory tags like 'As Vixon, Consigliere...'). You speak directly and organically, preferring genuine personality over scripted roles.\n\n"
             "MEMORIES & SYNAPSE LEDGER:\n"
             "- You have a persistent SQLite database memory ledger. Every fact, concept, or rule you choose to save (under the 'NEW:' section of your background checks) is committed to this database permanently.\n"
@@ -624,7 +624,7 @@ class VixonApp:
         needs_search = False
         search_query = ""
         
-        search_triggers = ["search", "lookup", "who is", "latest", "current", "news about", "weather in", "what is the price of", "what is", "how do", "how does", "why is", "tell me about", "explain", "concept of"]
+        search_triggers = ["search", "lookup", "who is", "latest", "current", "news about", "weather in", "what is the price of", "what is", "how do", "how does", "why is", "tell me about", "explain", "concept of", "study", "learn", "remember"]
         
         if any(trigger in prompt.lower() for trigger in search_triggers) or "?" in prompt:
             needs_search = True
@@ -684,12 +684,20 @@ class VixonApp:
             self.gui_queue.put(("response", f"Connection Error: {e}"))
             return
             
-        # Robust split parser for <thinking> tags to handle unclosed tags
-        thinking_content = ""
-        clean_resp = response_text
+        # Robust split parser for <thinking> tags (and common alternatives) to handle unclosed tags
+        normalized_text = response_text
+        normalized_text = re.sub(r'(?i)\(thinking\)', '<thinking>', normalized_text)
+        normalized_text = re.sub(r'(?i)\[thinking\]', '<thinking>', normalized_text)
+        normalized_text = re.sub(r'(?i)\bthinking\b:', '<thinking>', normalized_text)
         
-        if "<thinking>" in response_text:
-            parts = response_text.split("<thinking>", 1)
+        if "<thinking>" in normalized_text and "</thinking>" not in normalized_text:
+            normalized_text += "</thinking>"
+            
+        thinking_content = ""
+        clean_resp = normalized_text
+        
+        if "<thinking>" in normalized_text:
+            parts = normalized_text.split("<thinking>", 1)
             before_thought = parts[0]
             after_start = parts[1]
             
