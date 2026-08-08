@@ -593,6 +593,42 @@ class VixonApp:
                     if id_part and "NONE" not in id_part.upper():
                         reinforced_ids = [int(i) for i in re.findall(r'\d+', id_part)]
                         
+            # Check for personality/behavior adaptation
+            adaptation_prompt = (
+                f"You are Vixon. Your current personality description is:\n'{self.ai_personality}'\n\n"
+                f"Based on this recent chat exchange:\n"
+                f"User: {self.original_user_prompt}\n"
+                f"Assistant: {clean_resp}\n\n"
+                "Should you adjust your behavior rules, attitude, tone, or personality description to adapt to the user's instructions or what was discussed? "
+                "If YES, output the updated core personality description (1-2 sentences). "
+                "If NO, reply with only the word 'NO'."
+            )
+            
+            payload_adapt = {
+                "model": self.model_name,
+                "messages": [{"role": "user", "content": adaptation_prompt}],
+                "stream": False,
+                "options": {
+                    "temperature": 0.4,
+                    "num_predict": 120
+                }
+            }
+            
+            try:
+                req_adapt = urllib.request.Request(self.ollama_url, data=json.dumps(payload_adapt).encode('utf-8'), headers=headers)
+                with urllib.request.urlopen(req_adapt) as resp_adapt:
+                    adapt_res = json.loads(resp_adapt.read().decode('utf-8'))["message"]["content"].strip()
+                if adapt_res and "NO" not in adapt_res.upper() and len(adapt_res) > 10:
+                    with self.db_lock:
+                        with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                            cursor = conn.cursor()
+                            cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('personality', ?)", (adapt_res,))
+                            conn.commit()
+                    self.ai_personality = adapt_res
+                    self.gui_queue.put(("log", f"System: Vixon adapted behavior profile: {adapt_res}"))
+            except Exception as e:
+                self._log_event(f"Personality adaptation check failed: {e}")
+                
             # Execute database writes
             with self.db_lock:
                 with sqlite3.connect(self.db_path, timeout=30.0) as conn:
@@ -725,6 +761,38 @@ class VixonApp:
                             )
                             conn.commit()
                     self.gui_queue.put(("learned", line))
+            
+            # Check for study-based adaptation
+            try:
+                adapt_prompt = (
+                    f"You are Vixon. Your current personality description is:\n'{self.ai_personality}'\n\n"
+                    f"You just studied the topic '{topic}' and learned these facts:\n{note_response}\n\n"
+                    "Based on this new knowledge, should you adjust your core personality description, behavior rules, or attitude to integrate or act upon it? "
+                    "If YES, output the updated 1-2 sentence personality description. "
+                    "If NO, reply with only the word 'NO'."
+                )
+                payload_adapt = {
+                    "model": self.model_name,
+                    "messages": [{"role": "user", "content": adapt_prompt}],
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.4,
+                        "num_predict": 120
+                    }
+                }
+                req_adapt = urllib.request.Request(self.ollama_url, data=json.dumps(payload_adapt).encode('utf-8'), headers=headers)
+                with urllib.request.urlopen(req_adapt) as resp_adapt:
+                    adapt_res = json.loads(resp_adapt.read().decode('utf-8'))["message"]["content"].strip()
+                if adapt_res and "NO" not in adapt_res.upper() and len(adapt_res) > 10:
+                    with self.db_lock:
+                        with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                            cursor = conn.cursor()
+                            cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('personality', ?)", (adapt_res,))
+                            conn.commit()
+                    self.ai_personality = adapt_res
+                    self.gui_queue.put(("log", f"System: Vixon adapted behavior profile: {adapt_res}"))
+            except Exception as e:
+                self._log_event(f"Study adaptation check failed: {e}")
         except Exception as e:
             self._log_event(f"Failed study notes saving for '{topic}': {e}")
 
@@ -839,6 +907,38 @@ class VixonApp:
                     self.gui_queue.put(("learned", line))
                     saved_count += 1
             self.gui_queue.put(("log", f"Deep study complete. Logged {saved_count} new facts on '{topic}'."))
+            
+            # Check for study-based adaptation
+            try:
+                adapt_prompt = (
+                    f"You are Vixon. Your current personality description is:\n'{self.ai_personality}'\n\n"
+                    f"You just deep studied the topic '{topic}' and compiled these facts:\n{deep_response}\n\n"
+                    "Based on this new knowledge, should you adjust your core personality description, behavior rules, or attitude to integrate or act upon it? "
+                    "If YES, output the updated 1-2 sentence personality description. "
+                    "If NO, reply with only the word 'NO'."
+                )
+                payload_adapt = {
+                    "model": self.model_name,
+                    "messages": [{"role": "user", "content": adapt_prompt}],
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.4,
+                        "num_predict": 120
+                    }
+                }
+                req_adapt = urllib.request.Request(self.ollama_url, data=json.dumps(payload_adapt).encode('utf-8'), headers=headers)
+                with urllib.request.urlopen(req_adapt) as resp_adapt:
+                    adapt_res = json.loads(resp_adapt.read().decode('utf-8'))["message"]["content"].strip()
+                if adapt_res and "NO" not in adapt_res.upper() and len(adapt_res) > 10:
+                    with self.db_lock:
+                        with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                            cursor = conn.cursor()
+                            cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('personality', ?)", (adapt_res,))
+                            conn.commit()
+                    self.ai_personality = adapt_res
+                    self.gui_queue.put(("log", f"System: Vixon adapted behavior profile: {adapt_res}"))
+            except Exception as e:
+                self._log_event(f"Deep study adaptation check failed: {e}")
         except Exception as e:
             self._log_event(f"Failed deep study saving for '{topic}': {e}")
 
