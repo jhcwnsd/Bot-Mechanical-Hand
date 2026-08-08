@@ -440,8 +440,6 @@ class VixonApp:
                     self.current_command = content
                     self.approval_lbl.configure(text=f"⚠️ Execute CMD: {content}")
                     self.approval_frame.pack(fill=tk.X, padx=15, pady=(0, 15))
-                    self.send_btn.configure(state=tk.DISABLED)
-                    self.input_entry.configure(state=tk.DISABLED)
         except queue.Empty:
             pass
         self.root.after(100, self._process_queue)
@@ -687,8 +685,19 @@ class VixonApp:
         if approved:
             self.gui_queue.put(("log", f"Executing CMD: {cmd}"))
             try:
-                res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
-                output = f"[Command Out]\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}\n[End Out]"
+                # If command launches a GUI application, run it asynchronously to avoid blocking the thread
+                is_gui_cmd = any(keyword in cmd.lower() for keyword in ["start ", "chrome", "notepad", "explorer", "calc", "code", "run "])
+                if is_gui_cmd:
+                    proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                    try:
+                        stdout, stderr = proc.communicate(timeout=1.0)
+                        output = f"[Command Out]\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}\n[End Out]"
+                    except subprocess.TimeoutExpired:
+                        # GUI programs run continuously, which triggers a timeout. This is success.
+                        output = f"[Command Out]\nCommand successfully launched and running in background.\n[End Out]"
+                else:
+                    res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+                    output = f"[Command Out]\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}\n[End Out]"
             except subprocess.TimeoutExpired:
                 output = "[Command Out]\nError: Command timed out.\n[End Out]"
             except Exception as e:
