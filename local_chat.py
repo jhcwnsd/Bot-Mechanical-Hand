@@ -50,7 +50,9 @@ class PersonalAI:
                 CREATE TABLE IF NOT EXISTS memories (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     content TEXT,
-                    timestamp TEXT
+                    timestamp TEXT,
+                    strength REAL DEFAULT 1.0,
+                    last_used TEXT
                 )
             """)
             cursor.execute("""
@@ -61,6 +63,15 @@ class PersonalAI:
                     timestamp TEXT
                 )
             """)
+            
+            # Migration check: Add strength and last_used columns if they don't exist yet
+            cursor.execute("PRAGMA table_info(memories)")
+            columns = [info[1] for info in cursor.fetchall()]
+            if "strength" not in columns:
+                cursor.execute("ALTER TABLE memories ADD COLUMN strength REAL DEFAULT 1.0")
+            if "last_used" not in columns:
+                cursor.execute("ALTER TABLE memories ADD COLUMN last_used TEXT")
+                
             conn.commit()
 
     def _load_settings(self):
@@ -89,14 +100,14 @@ class PersonalAI:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT content FROM memories ORDER BY id DESC")
+                cursor.execute("SELECT content, strength FROM memories ORDER BY id DESC")
                 rows = cursor.fetchall()
                 if not rows:
                     return ""
                 
-                memories_str = "You have learned the following permanent facts about yourself and the user:\n"
+                memories_str = "You have learned the following facts about yourself and the user (strength levels indicate recall relevance):\n"
                 for row in rows:
-                    memories_str += f"- {row[0]}\n"
+                    memories_str += f"- {row[0]} (strength: {row[1]:.2f})\n"
                 return memories_str
         except Exception as e:
             print(f"Error loading memories: {e}")
@@ -158,6 +169,7 @@ class PersonalAI:
             return []
 
     async def extract_and_save_new_memories(self, user_prompt: str, bot_response: str):
+        # 1. First, check for new facts to learn
         reflection_prompt = (
             "You are an analytical memory logger. Inspect the following exchange between the User and the Assistant.\n"
             "Determine if the user has revealed any personal preferences, facts, rules, or instructions about themselves.\n"
@@ -172,28 +184,88 @@ class PersonalAI:
         reflection_result = await self._query_ollama(messages)
         reflection_result = reflection_result.strip()
         
-        if "NONE" in reflection_result or not reflection_result:
-            return
-        
         new_facts = []
-        for line in reflection_result.split("\n"):
-            line = line.strip().lstrip("-*• ").strip()
-            if line and len(line) > 5:
-                new_facts.append(line)
+        if "NONE" not in reflection_result and reflection_result:
+            for line in reflection_result.split("\n"):
+                line = line.strip().lstrip("-*• ").strip()
+                if line and len(line) > 5:
+                    new_facts.append(line)
         
+        # Save new memories with full strength
         if new_facts:
             try:
                 with sqlite3.connect(self.db_path) as conn:
                     cursor = conn.cursor()
                     for fact in new_facts:
                         cursor.execute(
-                            "INSERT INTO memories (content, timestamp) VALUES (?, ?)",
-                            (fact, datetime.now().isoformat())
+                            "INSERT INTO memories (content, timestamp, strength, last_used) VALUES (?, ?, 1.0, ?)",
+                            (fact, datetime.now().isoformat(), datetime.now().isoformat())
                         )
                         print(f"\n✨ [AI Learned]: {fact}")
                     conn.commit()
             except Exception as e:
                 print(f"Memory save error: {e}")
+
+        # 2. Run decay and reinforcement check
+        await self._decay_and_reinforce_memories(user_prompt, bot_response)
+
+    async def _decay_and_reinforce_memories(self, user_prompt: str, bot_response: str):
+        """Decays all memories, checks if any were referenced/re-used in conversation, and deletes decayed ones."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Fetch current memories list
+                cursor.execute("SELECT id, content, strength FROM memories")
+                memories = cursor.fetchall()
+                if not memories:
+                    return
+                
+                # Decay all memory strengths by 0.05 per message turn
+                cursor.execute("UPDATE memories SET strength = strength - 0.05")
+                conn.commit()
+                
+                # Ask Ollama to verify if any existing memories were referenced/reinforced in this exchange
+                memories_list_str = "\n".join([f"- ID {m[0]}: {m[1]}" for m in memories])
+                reinforce_prompt = (
+                    "You are a neural synapse monitor. Review this conversation exchange:\n"
+                    f"User: {user_prompt}\n"
+                    f"Assistant: {bot_response}\n\n"
+                    f"Here is our list of existing memory IDs and contents:\n{memories_list_str}\n\n"
+                    "Did the user or assistant refer to, reinforce, use, or confirm any of these existing memories in this exchange?\n"
+                    "If yes, output ONLY the ID numbers of the referenced memories, separated by commas (e.g., '3, 7'). "
+                    "If none were referenced or reinforced, reply with only the word: NONE."
+                )
+                
+                resp = await self._query_ollama([{"role": "user", "content": reinforce_prompt}], temperature=0.1)
+                resp = resp.strip()
+                
+                # Update reinforced memories strength back to 1.0
+                if "NONE" not in resp.upper() and resp:
+                    reinforced_ids = [int(i.strip()) for i in re.findall(r'\d+', resp)]
+                    for m_id in reinforced_ids:
+                        cursor.execute(
+                            "UPDATE memories SET strength = 1.0, last_used = ? WHERE id = ?",
+                            (datetime.now().isoformat(), m_id)
+                        )
+                        # Fetch content for print
+                        cursor.execute("SELECT content FROM memories WHERE id = ?", (m_id,))
+                        row = cursor.fetchone()
+                        if row:
+                            print(f"\n⚡ [Memory Reinforced]: {row[0]}")
+                    conn.commit()
+                
+                # Forget memories that fell below threshold (strength <= 0.25)
+                cursor.execute("SELECT content FROM memories WHERE strength <= 0.25")
+                forgotten = cursor.fetchall()
+                if forgotten:
+                    for f in forgotten:
+                        print(f"\n🗑️  [AI Forgot (Decayed)]: {f[0]}")
+                    cursor.execute("DELETE FROM memories WHERE strength <= 0.25")
+                    conn.commit()
+                    
+        except Exception as e:
+            print(f"Memory decay processing error: {e}")
 
     async def self_study(self, custom_topic: str = None):
         topic = custom_topic
@@ -236,8 +308,8 @@ class PersonalAI:
                 with sqlite3.connect(self.db_path) as conn:
                     cursor = conn.cursor()
                     cursor.execute(
-                        "INSERT INTO memories (content, timestamp) VALUES (?, ?)",
-                        (note, datetime.now().isoformat())
+                        "INSERT INTO memories (content, timestamp, strength, last_used) VALUES (?, ?, 1.0, ?)",
+                        (note, datetime.now().isoformat(), datetime.now().isoformat())
                     )
                     conn.commit()
                 print(f"📖 [AI Learned from Study]: {note}")
@@ -295,7 +367,6 @@ class PersonalAI:
             thinking_match = re.search(r'<thinking>(.*?)</thinking>', response_text, re.DOTALL)
             if thinking_match:
                 thinking_content = thinking_match.group(1).strip()
-                # Print thinking block in a clean, styled terminal container
                 print(f"\n╔{"═" * 58}╗")
                 print("╢ [Vixon's Thought Process]")
                 for line in thinking_content.split("\n"):
@@ -326,14 +397,11 @@ class PersonalAI:
                 else:
                     output = "[Command Out]\nError: User denied permission to execute this command.\n[End Out]"
                 
-                # Feed results back to model context
                 messages.append({"role": "user", "content": output})
                 self._save_chat_message("user", output)
                 
-                # Re-query
                 continue
             else:
-                # Strip thinking block out of final user-facing text
                 clean_response = re.sub(r'<thinking>.*?</thinking>', '', response_text, flags=re.DOTALL).strip()
                 self._save_chat_message("assistant", clean_response)
                 asyncio.create_task(self.extract_and_save_new_memories(user_prompt_original, clean_response))
