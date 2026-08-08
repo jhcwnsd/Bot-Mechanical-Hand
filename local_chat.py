@@ -4,6 +4,7 @@ import sqlite3
 import asyncio
 import aiohttp
 import re
+import subprocess
 from datetime import datetime
 from ddgs import DDGS
 
@@ -26,7 +27,15 @@ class PersonalAI:
             "Your personality/role: {ai_personality}\n\n"
             "STYLE RULES:\n"
             "- RESPONSE LENGTH: Keep your replies clean, balanced, and punchy. Aim for 2 to 4 sentences. Avoid writing huge blocks "
-            "of text, but do not be too brief or dismissive. Every sentence must sound calculated."
+            "of text, but do not be too brief or dismissive. Every sentence must sound calculated.\n\n"
+            "RUNNING COMMANDS ON USER'S PC:\n"
+            "- You have a command execution tool that can run PowerShell/CMD commands on the user's Windows machine to help them "
+            "(e.g., look up files, check directories, run local scripts, check system specs, or open applications).\n"
+            "- To run a command, you MUST output the command wrapped inside <run_command>your_command_here</run_command> tags.\n"
+            "- Do NOT write any other text or conversational reply when requesting a command. Simply request the command, "
+            "wait for the user to approve it and give you the output, and then you will generate your final response. "
+            "Example: to see files, output only: <run_command>dir</run_command>\n\n"
+            "Your memory database contains facts you have learned. You have the ability to search the web to expand your horizons."
         )
 
     def _init_db(self):
@@ -209,7 +218,6 @@ class PersonalAI:
                     cursor.execute("SELECT content FROM memories ORDER BY RANDOM() LIMIT 1")
                     row = cursor.fetchone()
                     if row:
-                        # Ask Ollama to pick a search topic related to this memory
                         ref_prompt = f"Given this memory: '{row[0]}'. What is an interesting historical or general topic related to this that I should search the web to study? Reply with ONLY the search topic. No quotes."
                         topic = await self._query_ollama([{"role": "user", "content": ref_prompt}])
                         topic = topic.strip().replace('"', '')
@@ -291,15 +299,48 @@ class PersonalAI:
             messages.append({"role": msg["role"], "content": msg["content"]})
             
         messages.append({"role": "user", "content": prompt})
-        
         self._save_chat_message("user", prompt)
-        response_text = await self._query_ollama(messages)
-        self._save_chat_message("assistant", response_text)
         
-        # Trigger background learning
-        asyncio.create_task(self.extract_and_save_new_memories(prompt, response_text))
-        
-        return response_text
+        # Loop to handle sequential tool calls (like running terminal commands)
+        user_prompt_original = prompt
+        while True:
+            response_text = await self._query_ollama(messages)
+            
+            # Check for <run_command> tool requests
+            match = re.search(r'<run_command>(.*?)</run_command>', response_text, re.DOTALL)
+            if match:
+                cmd = match.group(1).strip()
+                self._save_chat_message("assistant", response_text)
+                messages.append({"role": "assistant", "content": response_text})
+                
+                print(f"\n⚠️  [{self.ai_name} requests command]: {cmd}")
+                user_choice = input("Allow execution? (y/n): ").strip().lower()
+                
+                if user_choice == 'y':
+                    print("Running command...")
+                    try:
+                        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+                        stdout = res.stdout
+                        stderr = res.stderr
+                        output = f"[Command Out]\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}\n[End Out]"
+                    except subprocess.TimeoutExpired:
+                        output = "[Command Out]\nError: Command timed out after 30 seconds.\n[End Out]"
+                    except Exception as e:
+                        output = f"[Command Out]\nError executing command: {e}\n[End Out]"
+                else:
+                    output = "[Command Out]\nError: User denied permission to execute this command.\n[End Out]"
+                
+                # Append command results back to history to let LLM see it
+                messages.append({"role": "user", "content": output})
+                self._save_chat_message("user", output)
+                
+                # Run query again to let model process results
+                continue
+            else:
+                self._save_chat_message("assistant", response_text)
+                # Trigger background learning check
+                asyncio.create_task(self.extract_and_save_new_memories(user_prompt_original, response_text))
+                return response_text
 
 async def main():
     print("=" * 60)
