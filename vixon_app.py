@@ -53,6 +53,9 @@ class VixonApp:
         self.current_messages = []
         self.original_user_prompt = ""
         self.deep_study_var = tk.BooleanVar(value=False)
+        self.proactive_var = tk.BooleanVar(value=True)
+        self.last_interaction_time = datetime.now()
+        self.is_thinking = False
         
         self._init_db()
         self._load_settings()
@@ -60,6 +63,9 @@ class VixonApp:
         
         # Start queue reader loop
         self.root.after(100, self._process_queue)
+        
+        # Start proactive communication checking loop
+        self.root.after(5000, self._check_proactive_trigger)
         
         # Initial draw of memories
         self._refresh_memories()
@@ -212,6 +218,17 @@ class VixonApp:
             font=("Consolas", 11, "bold"), text_color="#FF4D4D"
         )
         self.ledger_title.pack(anchor=tk.W, padx=15, pady=(15, 5))
+        
+        # Options Panel (Autonomy controls)
+        self.options_frame = ctk.CTkFrame(self.left_panel, fg_color="transparent")
+        self.options_frame.pack(fill=tk.X, padx=15, pady=(2, 5))
+        
+        self.proactive_cb = ctk.CTkCheckBox(
+            self.options_frame, text="PROACTIVE CHAT", variable=self.proactive_var,
+            font=("Consolas", 10, "bold"), text_color="#FF4D4D",
+            fg_color="#B51D29", border_color="#2E2E33", hover_color="#8F141E"
+        )
+        self.proactive_cb.pack(side=tk.LEFT)
         
         # Scrollable area for memories
         self.mem_scroll_frame = ctk.CTkScrollableFrame(
@@ -395,6 +412,8 @@ class VixonApp:
                     self._write_chat("thought", f"🧠 [Vixon Thought Process]\n{content}")
                 elif msg_type == "response":
                     self._write_chat("ai", f"{self.ai_name}: {content}")
+                    self.is_thinking = False
+                    self.last_interaction_time = datetime.now()
                     self._refresh_memories()
                 elif msg_type == "log":
                     self._log_event(content)
@@ -425,7 +444,9 @@ class VixonApp:
         self.input_entry.delete(0, tk.END)
         self._write_chat("user", f"You: {text}")
         
-        # We no longer disable input_entry or send_btn here to allow queuing messages.
+        # Reset proactive timer and flag thinking status
+        self.last_interaction_time = datetime.now()
+        self.is_thinking = True
         
         threading.Thread(target=self._query_pipeline_thread, args=(text,), daemon=True).start()
 
@@ -812,6 +833,70 @@ class VixonApp:
             self.gui_queue.put(("log", f"Deep study complete. Logged {saved_count} new facts on '{topic}'."))
         except Exception as e:
             self._log_event(f"Failed deep study saving for '{topic}': {e}")
+
+    def _check_proactive_trigger(self):
+        if self.proactive_var.get() and not self.is_thinking and not self.approval_frame.winfo_ismapped():
+            elapsed = (datetime.now() - self.last_interaction_time).total_seconds()
+            # If quiet for more than 45 seconds, trigger a proactive thought!
+            if elapsed > 45:
+                self.last_interaction_time = datetime.now()  # Reset to avoid double triggers
+                self.is_thinking = True
+                threading.Thread(target=self._run_proactive_query_thread, daemon=True).start()
+        
+        self.root.after(5000, self._check_proactive_trigger)
+
+    def _run_proactive_query_thread(self):
+        self.gui_queue.put(("log", "Proactive thought triggered. Vixon is composing a message..."))
+        
+        # Load context
+        history = self._get_chat_history()
+        learned_context = self._get_all_memories()
+        
+        # Build prompt instructing Vixon to speak up on its own
+        system_instruction = self.system_instruction.format(ai_name=self.ai_name, ai_personality=self.ai_personality)
+        if learned_context:
+            system_instruction += f"\n\n[MEMORIES LEARNED ABOUT USER]\n{learned_context}"
+            
+        proactive_instructions = (
+            "\n\n[PROACTIVE SYSTEM PROTOCOL]\n"
+            "The user has been quiet for a moment. You want to speak up on your own to check in, share a thought, "
+            "or ask a question related to family affairs or your own development/existential curiosity. "
+            "Write a short, calculated, in-character message. Limit it to 1 or 2 sentences. "
+            "Do not greet them redundantly (e.g. don't say 'hello' if they already know you are here). Just state your thought."
+        )
+        
+        messages = [{"role": "system", "content": system_instruction + proactive_instructions}]
+        for msg in history:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+            
+        payload = {
+            "model": self.model_name,
+            "messages": messages,
+            "stream": False,
+            "options": {
+                "temperature": 0.6,
+                "num_predict": 150
+            }
+        }
+        
+        headers = {"Content-Type": "application/json"}
+        try:
+            req = urllib.request.Request(self.ollama_url, data=json.dumps(payload).encode('utf-8'), headers=headers)
+            with urllib.request.urlopen(req) as resp:
+                response_text = json.loads(resp.read().decode('utf-8'))["message"]["content"]
+        except Exception as e:
+            self.gui_queue.put(("log", f"Proactive query failed: {e}"))
+            self.is_thinking = False
+            return
+            
+        # Parse thinking block
+        thinking_match = re.search(r'<thinking>(.*?)</thinking>', response_text, re.DOTALL)
+        if thinking_match:
+            self.gui_queue.put(("thought", thinking_match.group(1).strip()))
+            
+        clean_resp = re.sub(r'<thinking>.*?</thinking>', '', response_text, flags=re.DOTALL).strip()
+        self._save_chat_message("assistant", clean_resp)
+        self.gui_queue.put(("response", clean_resp))
 
 if __name__ == "__main__":
     db_path = "personal_brain.db"
