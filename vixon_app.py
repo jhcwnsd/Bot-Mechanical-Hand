@@ -482,6 +482,7 @@ class VixonApp:
                 pct_lbl = ctk.CTkLabel(bar_frame, text=status_text, font=("Consolas", 8), text_color="#888888")
                 pct_lbl.pack(side=tk.RIGHT)
                 
+            self.root.update_idletasks()
         except Exception as e:
             self._log_event(f"Error drawing memories panel: {e}")
 
@@ -773,10 +774,10 @@ class VixonApp:
                 f"Assistant Response (includes internal thoughts): {response_text}\n\n"
                 f"Current memories list:\n{memories_list_str}\n\n"
                 "You have full autonomy and choice over what you remember. You do not have to save everything. "
-                "Decide if there are any new facts, concepts, or rules discussed that you genuinely wish to commit to your permanent memory ledger for your own development, or if you choose to discard them. "
-                "If the user explicitly asked or ordered you to study, learn, search, or remember a topic, you must respect their request and choose to commit the key factual lessons from that research to your ledger.\n\n"
+                "Decide if there are any new facts, concepts, vocabulary words, translation notes, or rules discussed in either the conversation or your internal thoughts that you genuinely wish to commit to your permanent memory ledger for your own development, or if you choose to discard them. "
+                "If the user explicitly asked or ordered you to study, learn, search, or remember a topic (such as Italian curse words), you must respect their request and choose to commit the key factual lessons or vocabulary words from that research to your ledger.\n\n"
                 "Extract two sets of details in this format (nothing else):\n"
-                "NEW: <Write any new concise facts, conceptual notes, or rules you chose to commit to your permanent memory ledger, one per line. If you choose to remember nothing, write NONE>\n"
+                "NEW: <Write any new concise facts, studied topics, vocabulary words, or conceptual notes you chose to commit to your permanent memory ledger, one per line (written in third-person, e.g. 'Research notes: ...' or 'Italian vocabulary: ...'). If you choose to remember nothing, write NONE>\n"
                 "REINFORCE: <Write IDs of any existing memories you verified or referred to in the text, comma-separated. If none, write NONE>"
             )
             
