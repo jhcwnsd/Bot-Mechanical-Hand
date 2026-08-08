@@ -48,6 +48,7 @@ class VixonApp:
         )
         
         self.gui_queue = queue.Queue()
+        self.db_lock = threading.Lock()
         self.command_pending = False
         self.current_messages = []
         self.original_user_prompt = ""
@@ -174,13 +175,14 @@ class VixonApp:
 
     def _save_chat_message(self, role, content):
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "INSERT INTO chat_history (role, content, timestamp) VALUES (?, ?, ?)",
-                    (role, content, datetime.now().isoformat())
-                )
-                conn.commit()
+            with self.db_lock:
+                with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "INSERT INTO chat_history (role, content, timestamp) VALUES (?, ?, ?)",
+                        (role, content, datetime.now().isoformat())
+                    )
+                    conn.commit()
         except Exception as e:
             self._log_event(f"Error saving chat log: {e}")
 
@@ -554,42 +556,43 @@ class VixonApp:
                         reinforced_ids = [int(i) for i in re.findall(r'\d+', id_part)]
                         
             # Execute database writes
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                
-                # Decay active memories by 0.05
-                cursor.execute("UPDATE memories SET strength = strength - 0.05")
-                conn.commit()
-                
-                # Save new facts
-                for fact in new_facts:
-                    cursor.execute(
-                        "INSERT INTO memories (content, timestamp, strength, last_used) VALUES (?, ?, 1.0, ?)",
-                        (fact, datetime.now().isoformat(), datetime.now().isoformat())
-                    )
-                    self.gui_queue.put(("learned", fact))
-                
-                # Apply reinforcements
-                for m_id in reinforced_ids:
-                    cursor.execute(
-                        "UPDATE memories SET strength = 1.0, last_used = ? WHERE id = ?",
-                        (datetime.now().isoformat(), m_id)
-                    )
-                    cursor.execute("SELECT content FROM memories WHERE id = ?", (m_id,))
-                    row = cursor.fetchone()
-                    if row:
-                        self.gui_queue.put(("reinforced", row[0]))
-                        
-                conn.commit()
-                
-                # Delete decayed memories
-                cursor.execute("SELECT content FROM memories WHERE strength <= 0.25")
-                forgotten = cursor.fetchall()
-                if forgotten:
-                    for f in forgotten:
-                        self.gui_queue.put(("forgot", f[0]))
-                    cursor.execute("DELETE FROM memories WHERE strength <= 0.25")
+            with self.db_lock:
+                with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                    cursor = conn.cursor()
+                    
+                    # Decay active memories by 0.05
+                    cursor.execute("UPDATE memories SET strength = strength - 0.05")
                     conn.commit()
+                    
+                    # Save new facts
+                    for fact in new_facts:
+                        cursor.execute(
+                            "INSERT INTO memories (content, timestamp, strength, last_used) VALUES (?, ?, 1.0, ?)",
+                            (fact, datetime.now().isoformat(), datetime.now().isoformat())
+                        )
+                        self.gui_queue.put(("learned", fact))
+                    
+                    # Apply reinforcements
+                    for m_id in reinforced_ids:
+                        cursor.execute(
+                            "UPDATE memories SET strength = 1.0, last_used = ? WHERE id = ?",
+                            (datetime.now().isoformat(), m_id)
+                        )
+                        cursor.execute("SELECT content FROM memories WHERE id = ?", (m_id,))
+                        row = cursor.fetchone()
+                        if row:
+                            self.gui_queue.put(("reinforced", row[0]))
+                            
+                    conn.commit()
+                    
+                    # Delete decayed memories
+                    cursor.execute("SELECT content FROM memories WHERE strength <= 0.25")
+                    forgotten = cursor.fetchall()
+                    if forgotten:
+                        for f in forgotten:
+                            self.gui_queue.put(("forgot", f[0]))
+                        cursor.execute("DELETE FROM memories WHERE strength <= 0.25")
+                        conn.commit()
                     
         except Exception as e:
             self._log_event(f"Background logs processing failed: {e}")
@@ -619,13 +622,16 @@ class VixonApp:
         self._run_ollama_turn()
 
     def _trigger_self_study(self):
-        topic = self.study_entry.get().strip()
-        if not topic:
+        topic_text = self.study_entry.get().strip()
+        if not topic_text:
             return
             
         self.study_entry.delete(0, tk.END)
         
-        threading.Thread(target=self._run_study_thread, args=(topic,), daemon=True).start()
+        # Support comma-separated topics for concurrent study threads
+        topics = [t.strip() for t in topic_text.split(",") if t.strip()]
+        for t in topics:
+            threading.Thread(target=self._run_study_thread, args=(t,), daemon=True).start()
 
     def _run_study_thread(self, topic):
         self.gui_queue.put(("log", f"Self-Study: Researching '{topic}'..."))
@@ -633,19 +639,19 @@ class VixonApp:
             with DDGS() as ddgs:
                 results = [r["body"] for r in ddgs.text(topic, max_results=3)]
         except Exception as e:
-            self.gui_queue.put(("log", f"Study search failed: {e}"))
+            self.gui_queue.put(("log", f"Study search failed for '{topic}': {e}"))
             return
             
         if not results:
-            self.gui_queue.put(("log", "No results found to study."))
+            self.gui_queue.put(("log", f"No results found for '{topic}'."))
             return
             
         formatted_results = "\n".join([f"- {r}" for r in results])
         study_prompt = (
             f"You are Vixon. You are studying the following search results about: '{topic}'.\n"
-            "Summarize the most important factual lesson or note from this research into a clean, concise, one-sentence bullet point "
-            "written in the third person (e.g. 'Research notes: The Italian mafia code of omertà began as...').\n"
-            "Do not talk to the user. Return ONLY the one-sentence bullet point.\n\n"
+            "Extract the 3 most important factual lessons or notes from this research into 3 separate, concise, "
+            "third-person sentences (e.g. 'Research notes: Silius code...').\n"
+            "Do not talk to the user. Return ONLY the 3 bullet points, one per line.\n\n"
             f"Search Results:\n{formatted_results}"
         )
         
@@ -655,7 +661,7 @@ class VixonApp:
             "stream": False,
             "options": {
                 "temperature": 0.5,
-                "num_predict": 120
+                "num_predict": 200
             }
         }
         
@@ -663,19 +669,23 @@ class VixonApp:
         try:
             req = urllib.request.Request(self.ollama_url, data=json.dumps(payload_study).encode('utf-8'), headers=headers)
             with urllib.request.urlopen(req) as resp:
-                note = json.loads(resp.read().decode('utf-8'))["message"]["content"].strip().lstrip("-*• ").strip()
+                note_response = json.loads(resp.read().decode('utf-8'))["message"]["content"].strip()
                 
-            if note and len(note) > 10:
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "INSERT INTO memories (content, timestamp, strength, last_used) VALUES (?, ?, 1.0, ?)",
-                        (note, datetime.now().isoformat(), datetime.now().isoformat())
-                    )
-                    conn.commit()
-                self.gui_queue.put(("learned", note))
+            # Process and save each bullet point extracted
+            for line in note_response.split("\n"):
+                line = line.strip().lstrip("-*• ").strip()
+                if line and len(line) > 10:
+                    with self.db_lock:
+                        with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                            cursor = conn.cursor()
+                            cursor.execute(
+                                "INSERT INTO memories (content, timestamp, strength, last_used) VALUES (?, ?, 1.0, ?)",
+                                (line, datetime.now().isoformat(), datetime.now().isoformat())
+                            )
+                            conn.commit()
+                    self.gui_queue.put(("learned", line))
         except Exception as e:
-            self._log_event(f"Failed study notes saving: {e}")
+            self._log_event(f"Failed study notes saving for '{topic}': {e}")
 
 if __name__ == "__main__":
     db_path = "personal_brain.db"
