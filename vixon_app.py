@@ -688,14 +688,15 @@ class VixonApp:
             
             # Combine learning extraction and reinforcement checks into a single quick query
             consolidated_prompt = (
-                "Review this chat exchange:\n"
+                f"You are Vixon. Review this chat exchange:\n"
                 f"User: {self.original_user_prompt}\n"
                 f"Assistant: {clean_resp}\n\n"
                 f"Current memories list:\n{memories_list_str}\n\n"
-                "Review the details discussed. What important facts, concepts, philosophical lessons, or personal rules did Vixon learn or choose to remember for its own development from this exchange?\n"
+                "You have full autonomy and choice over what you remember. You do not have to save everything. "
+                "Decide if there are any new facts, concepts, or rules discussed that you genuinely wish to commit to your permanent memory ledger for your own development, or if you choose to discard them.\n\n"
                 "Extract two sets of details in this format (nothing else):\n"
-                "NEW: <Write any new concise facts, conceptual notes, or rules Vixon chose to learn from this chat, one per line (written in third-person, e.g. 'Research notes: ...'). If none, write NONE>\n"
-                "REINFORCE: <Write IDs of any existing memories verified or referred to in the text, comma-separated. If none, write NONE>"
+                "NEW: <Write any new concise facts, conceptual notes, or rules you chose to commit to your permanent memory ledger, one per line. If you choose to remember nothing, write NONE>\n"
+                "REINFORCE: <Write IDs of any existing memories you verified or referred to in the text, comma-separated. If none, write NONE>"
             )
             
             payload = {
