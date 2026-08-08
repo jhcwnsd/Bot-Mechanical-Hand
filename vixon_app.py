@@ -538,6 +538,16 @@ class VixonApp:
         except Exception as e:
             self._log_event(f"Failed to unpin selected memories: {e}")
 
+    def _delete_thinking_placeholder(self):
+        try:
+            self.chat_area.configure(state=tk.NORMAL)
+            text_content = self.chat_area.get("1.0", tk.END)
+            if "🧠 Vixon is thinking..." in text_content:
+                self.chat_area.delete("end-2c linestart", "end")
+            self.chat_area.configure(state=tk.DISABLED)
+        except Exception:
+            pass
+
     def _process_queue(self):
         try:
             while True:
@@ -546,8 +556,11 @@ class VixonApp:
                 content = item[1]
                 
                 if msg_type == "thought":
-                    self._write_chat("thought", f"🧠 {content}")
+                    self._log_event(f"🧠 Thoughts: {content}")
+                elif msg_type == "delete_placeholder":
+                    self._delete_thinking_placeholder()
                 elif msg_type == "response":
+                    self._delete_thinking_placeholder()
                     self._write_chat("ai", f"{self.ai_name}: {content}")
                     self.is_thinking = False
                     import random
@@ -580,6 +593,7 @@ class VixonApp:
         
         self.input_entry.delete(0, tk.END)
         self._write_chat("user", f"You: {text}")
+        self._write_chat("thought", "🧠 Vixon is thinking...")
         
         # Reset proactive timer and flag thinking status
         import random
@@ -646,7 +660,7 @@ class VixonApp:
             "stream": False,
             "options": {
                 "temperature": 0.5,
-                "num_predict": 200 # Cap predictions length to increase speed
+                "num_predict": 1024
             }
         }
         
@@ -656,6 +670,7 @@ class VixonApp:
             with urllib.request.urlopen(req) as resp:
                 response_text = json.loads(resp.read().decode('utf-8'))["message"]["content"]
         except Exception as e:
+            self.gui_queue.put(("delete_placeholder", ""))
             self.gui_queue.put(("response", f"Connection Error: {e}"))
             return
             
@@ -1154,6 +1169,9 @@ class VixonApp:
             self.is_thinking = False
 
     def _run_proactive_query_thread(self):
+        # Print temporary thinking placeholder
+        self._write_chat("thought", "🧠 Vixon is thinking...")
+        
         # Load context
         history = self._get_chat_history()
         learned_context = self._get_all_memories()
@@ -1180,7 +1198,7 @@ class VixonApp:
             "stream": False,
             "options": {
                 "temperature": 0.6,
-                "num_predict": 150
+                "num_predict": 1024
             }
         }
         
@@ -1190,6 +1208,7 @@ class VixonApp:
             with urllib.request.urlopen(req) as resp:
                 response_text = json.loads(resp.read().decode('utf-8'))["message"]["content"]
         except Exception as e:
+            self.gui_queue.put(("delete_placeholder", ""))
             self.gui_queue.put(("log", f"Proactive query failed: {e}"))
             self.is_thinking = False
             return
