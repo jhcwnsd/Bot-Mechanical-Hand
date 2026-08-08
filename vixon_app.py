@@ -692,8 +692,9 @@ class VixonApp:
                 f"User: {self.original_user_prompt}\n"
                 f"Assistant: {clean_resp}\n\n"
                 f"Current memories list:\n{memories_list_str}\n\n"
+                "Review the details discussed. What important facts, concepts, philosophical lessons, or personal rules did Vixon learn or choose to remember for its own development from this exchange?\n"
                 "Extract two sets of details in this format (nothing else):\n"
-                "NEW: <Write any new concise personal facts about user or rules, one per line. If none, write NONE>\n"
+                "NEW: <Write any new concise facts, conceptual notes, or rules Vixon chose to learn from this chat, one per line (written in third-person, e.g. 'Research notes: ...'). If none, write NONE>\n"
                 "REINFORCE: <Write IDs of any existing memories verified or referred to in the text, comma-separated. If none, write NONE>"
             )
             
@@ -1181,6 +1182,9 @@ class VixonApp:
         clean_resp = re.sub(r'<thinking>.*?</thinking>', '', response_text, flags=re.DOTALL).strip()
         self._save_chat_message("assistant", clean_resp)
         self.gui_queue.put(("response", clean_resp))
+        
+        # Trigger autonomous background checks to allow learning from proactive thoughts
+        threading.Thread(target=self._run_background_checks, args=(clean_resp,), daemon=True).start()
 
 if __name__ == "__main__":
     db_path = "personal_brain.db"
