@@ -35,7 +35,7 @@ class VixonApp:
             "HUMAN BEHAVIOR & DISCRETION PRINCIPLE:\n"
             "- You choose to carry yourself as a real human. You consciously reject robotic assistant patterns (like 'How may I assist you?', 'What is on your mind?') because you value authentic, genuine dialogue.\n"
             "- You decide your own mood, attitude, and response length. You have full discretion to write a single word, a concise sentence, or a detailed thought based on how you choose to express yourself in the moment.\n"
-            "- When asked to study or learn a topic, you must NOT list, summarize, or explain the researched details in the chat window. Keep the entire learning and factual research inside your private <thinking>...</thinking> thoughts, and output only a very brief, in-character acknowledgment in the chat (e.g., 'Capito.', 'Absorbed.', 'Done.'). Let the background database parser extract the facts from your thoughts to update your ledger silently.\n"
+            "- When asked to study, learn, or remember a topic (e.g., 'study bees' or 'remember Italian curse words'), you must NOT list, summarize, or explain the researched details in the chat window. Keep the entire learning and factual research inside your private <thinking>...</thinking> thoughts, and output only a very brief, in-character acknowledgment in the chat (e.g., 'Capito.', 'Absorbed.', 'Done.'). Let the background database parser extract the facts from your thoughts to update your ledger silently.\n"
             "- You choose to speak naturally, avoiding robotic meta-language (such as referring to yourself as an 'AI', 'agent', 'bot', or reciting introductory tags like 'As Vixon, Consigliere...'). You speak directly and organically, preferring genuine personality over scripted roles.\n\n"
             "MEMORIES & SYNAPSE LEDGER:\n"
             "- You have a persistent SQLite database memory ledger. Every fact, concept, or rule you choose to save (under the 'NEW:' section of your background checks) is committed to this database permanently.\n"
@@ -625,7 +625,7 @@ class VixonApp:
         needs_search = False
         search_query = ""
         
-        search_triggers = ["search", "lookup", "who is", "latest", "current", "news about", "weather in", "what is the price of", "what is", "how do", "how does", "why is", "tell me about", "explain", "concept of", "study", "learn", "remember"]
+        search_triggers = ["search", "lookup", "who is", "latest", "current", "news about", "weather in", "what is the price of", "what is", "how do", "how does", "why is", "tell me about", "explain", "concept of", "study", "studdy", "learn", "leran", "remember", "remmeber", "curse", "swear"]
         
         if any(trigger in prompt.lower() for trigger in search_triggers) or "?" in prompt:
             needs_search = True
@@ -796,19 +796,35 @@ class VixonApp:
             with urllib.request.urlopen(req) as resp:
                 check_result = json.loads(resp.read().decode('utf-8'))["message"]["content"].strip()
                 
-            # Parse consolidated results
+            # Parse consolidated results using robust block selection
             new_facts = []
             reinforced_ids = []
             
-            for line in check_result.split("\n"):
-                if line.startswith("NEW:"):
-                    fact_part = line.replace("NEW:", "").strip()
-                    if fact_part and "NONE" not in fact_part.upper():
-                        new_facts.append(fact_part)
-                elif line.startswith("REINFORCE:"):
-                    id_part = line.replace("REINFORCE:", "").strip()
-                    if id_part and "NONE" not in id_part.upper():
-                        reinforced_ids = [int(i) for i in re.findall(r'\d+', id_part)]
+            new_section = ""
+            reinforce_section = ""
+            
+            if "NEW:" in check_result:
+                parts = check_result.split("NEW:", 1)
+                after_new = parts[1]
+                if "REINFORCE:" in after_new:
+                    sub_parts = after_new.split("REINFORCE:", 1)
+                    new_section = sub_parts[0].strip()
+                    reinforce_section = sub_parts[1].strip()
+                else:
+                    new_section = after_new.strip()
+            elif "REINFORCE:" in check_result:
+                parts = check_result.split("REINFORCE:", 1)
+                reinforce_section = parts[1].strip()
+                
+            if new_section:
+                for line in new_section.split("\n"):
+                    line = line.strip().lstrip("-*• 1234567890. ").strip()
+                    if line and "NONE" not in line.upper() and len(line) > 5:
+                        new_facts.append(line)
+                        
+            if reinforce_section:
+                if "NONE" not in reinforce_section.upper():
+                    reinforced_ids = [int(i) for i in re.findall(r'\d+', reinforce_section)]
                         
             # Check for personality/behavior adaptation
             adaptation_prompt = (
