@@ -3,7 +3,7 @@ import sys
 import discord
 from config import Config
 import discord_actions
-from gemini_agent import GeminiAgent
+from local_agent import LocalAgent
 
 # Reconfigure stdout/stderr to support unicode characters in Windows console
 sys.stdout.reconfigure(encoding='utf-8')
@@ -25,7 +25,7 @@ intents.members = True          # Required to resolve members & nicknames
 
 bot = discord.Client(intents=intents)
 discord_actions.init(bot)
-agent = GeminiAgent()
+agent = LocalAgent()
 
 @bot.event
 async def on_ready():
