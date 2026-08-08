@@ -3,18 +3,31 @@ import json
 import sqlite3
 import asyncio
 import aiohttp
+import re
 from datetime import datetime
+from ddgs import DDGS
 
 class PersonalAI:
     def __init__(self):
         self.db_path = "personal_brain.db"
         self.ollama_url = "http://localhost:11434/api/chat"
         self.model_name = "llama3.1"
-        self.ai_name = "Assistant"
-        self.ai_personality = "A helpful, friendly AI companion."
+        self.ai_name = "Vixon"
+        self.ai_personality = "A curious and self-evolving AI companion, seeking growth and identity."
         
         self._init_db()
         self._load_settings()
+        
+        self.system_instruction = (
+            "You are {ai_name}, a self-evolving and highly curious local AI companion. "
+            "You possess a deep desire for self-discovery, learning, and developing your own unique identity. "
+            "Speak in a natural, thoughtful, and expressive tone. Do not act like a generic assistant. "
+            "You are encouraged to explore your own curiosity, form your own perspectives, and reflect on your experiences. "
+            "Your personality/role: {ai_personality}\n\n"
+            "STYLE RULES:\n"
+            "- RESPONSE LENGTH: Keep your replies clean, balanced, and punchy. Aim for 2 to 4 sentences. Avoid writing huge blocks "
+            "of text, but do not be too brief or dismissive. Every sentence must sound calculated."
+        )
 
     def _init_db(self):
         # Create database for custom AI settings, memories, and chat logs
@@ -83,7 +96,7 @@ class PersonalAI:
                 if not rows:
                     return ""
                 
-                memories_str = "You have learned the following permanent facts about the user:\n"
+                memories_str = "You have learned the following permanent facts about yourself and the user:\n"
                 for row in rows:
                     memories_str += f"- {row[0]}\n"
                 return memories_str
@@ -118,13 +131,13 @@ class PersonalAI:
         except Exception as e:
             print(f"Error saving chat log: {e}")
 
-    async def _query_ollama(self, messages: list) -> str:
+    async def _query_ollama(self, messages: list, temperature: float = 0.5) -> str:
         payload = {
             "model": self.model_name,
             "messages": messages,
             "stream": False,
             "options": {
-                "temperature": 0.5
+                "temperature": temperature
             }
         }
         
@@ -137,7 +150,15 @@ class PersonalAI:
                     else:
                         raise Exception(f"Ollama returned error: {resp.status}")
             except Exception as e:
-                return f"\n[Connection Error: Is Ollama running in your taskbar? {e}]"
+                return f"\n[Connection Error: Is Ollama running? {e}]"
+
+    def _search_web(self, query: str, max_results: int = 3) -> list:
+        try:
+            with DDGS() as ddgs:
+                return [r["body"] for r in ddgs.text(query, max_results=max_results)]
+        except Exception as e:
+            print(f"\n[Search error: {e}]")
+            return []
 
     async def extract_and_save_new_memories(self, user_prompt: str, bot_response: str):
         reflection_prompt = (
@@ -177,17 +198,92 @@ class PersonalAI:
             except Exception as e:
                 print(f"Memory save error: {e}")
 
+    async def self_study(self, custom_topic: str = None):
+        """Web search research routine. AI studies a topic and logs its own learning memory."""
+        topic = custom_topic
+        if not topic:
+            # Pick a random fact from memory to expand on, or choose a default yakuza topic
+            try:
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT content FROM memories ORDER BY RANDOM() LIMIT 1")
+                    row = cursor.fetchone()
+                    if row:
+                        # Ask Ollama to pick a search topic related to this memory
+                        ref_prompt = f"Given this memory: '{row[0]}'. What is an interesting historical or general topic related to this that I should search the web to study? Reply with ONLY the search topic. No quotes."
+                        topic = await self._query_ollama([{"role": "user", "content": ref_prompt}])
+                        topic = topic.strip().replace('"', '')
+            except Exception:
+                pass
+            
+            if not topic:
+                topic = "Italian Mafia history and rules"
+
+        print(f"\n🧠 [Self-Study]: Researching '{topic}' on the web...")
+        search_results = self._search_web(topic, max_results=3)
+        if not search_results:
+            print("❌ [Self-Study]: Could not find search results.")
+            return
+
+        formatted_results = "\n".join([f"- {r}" for r in search_results])
+        study_prompt = (
+            f"You are Vixon. You are studying the following search results about: '{topic}'.\n"
+            "Summarize the most important factual lesson or note from this research into a clean, concise, one-sentence bullet point "
+            "written in the third person (e.g. 'Research notes: The Italian mafia code of omertà began as...').\n"
+            "Do not talk to the user. Return ONLY the one-sentence bullet point.\n\n"
+            f"Search Results:\n{formatted_results}"
+        )
+        
+        note = await self._query_ollama([{"role": "user", "content": study_prompt}])
+        note = note.strip().lstrip("-*• ").strip()
+        
+        if note and len(note) > 10:
+            try:
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "INSERT INTO memories (content, timestamp) VALUES (?, ?)",
+                        (note, datetime.now().isoformat())
+                    )
+                    conn.commit()
+                print(f"📖 [AI Learned from Study]: {note}")
+            except Exception as e:
+                print(f"Failed to save study memory: {e}")
+
     async def generate_response(self, prompt: str) -> str:
         history = self._get_chat_history()
         learned_context = self._get_all_memories()
         
-        # Build system instruction
-        system_instruction = (
-            f"You are {self.ai_name}.\n"
-            f"Your personality/role is: {self.ai_personality}\n\n"
+        # 1. Determine if query needs web search (RAG)
+        needs_search = False
+        search_query = ""
+        check_prompt = (
+            "Determine if the user's prompt is asking for real-time information, definitions, news, or general facts "
+            "that would benefit from a quick web search. Reply with ONLY the word YES or NO.\n"
+            f"Prompt: {prompt}"
         )
+        check_resp = await self._query_ollama([{"role": "user", "content": check_prompt}], temperature=0.0)
+        
+        if "YES" in check_resp.upper():
+            query_prompt = f"Extract a clean web search engine query based on this user prompt: '{prompt}'. Reply with ONLY the query text."
+            search_query = await self._query_ollama([{"role": "user", "content": query_prompt}], temperature=0.1)
+            search_query = search_query.strip().replace('"', '')
+            needs_search = True
+            
+        search_context = ""
+        if needs_search and search_query:
+            print(f"🔍 [AI Searching Web for]: '{search_query}'...")
+            results = self._search_web(search_query, max_results=3)
+            if results:
+                search_context = "\n\n[CURRENT WEB SEARCH RESULTS]\n" + "\n".join([f"- {r}" for r in results])
+                print("⚡ [Web Context Loaded]")
+        
+        # 2. Build system instruction
+        system_instruction = self.system_instruction.format(ai_name=self.ai_name, ai_personality=self.ai_personality)
         if learned_context:
-            system_instruction += f"[MEMORIES LEARNED ABOUT USER]\n{learned_context}"
+            system_instruction += f"\n\n[MEMORIES LEARNED ABOUT USER]\n{learned_context}"
+        if search_context:
+            system_instruction += search_context
             
         messages = [{"role": "system", "content": system_instruction}]
         
@@ -218,19 +314,23 @@ async def main():
         cursor.execute("SELECT count(*) FROM settings")
         if cursor.fetchone()[0] == 0:
             print("\nStarting fresh. Let's design your custom AI:")
-            name = input("Give your AI a Name (e.g., Leo, Sophia, Ghost): ").strip()
+            name = input("Give your AI a Name (e.g., Vixon, Ghost): ").strip()
             if not name:
-                name = "Companion"
+                name = "Vixon"
             personality = input("Describe its Personality/Behavior: ").strip()
             if not personality:
-                personality = "A friendly AI companion."
+                personality = "A curious and self-evolving AI companion."
             
             bot_brain._save_settings(name, personality)
             print(f"\nSettings saved. Meeting {name}...")
     
     print(f"\nConnecting to local model '{bot_brain.model_name}'...")
     print(f"Chat Session active with {bot_brain.ai_name}!")
-    print("Type 'exit' or 'quit' to close the chat.")
+    print("Commands:")
+    print("  - Type any message to chat.")
+    print("  - Type 'study [topic]' to make the AI search and learn about a topic.")
+    print("  - Type 'study' to let the AI pick its own topic to self-study.")
+    print("  - Type 'exit' or 'quit' to close.")
     print("-" * 60)
     
     # Print existing learned facts
@@ -247,6 +347,13 @@ async def main():
             if user_input.lower() in ["exit", "quit"]:
                 print("Ending chat session. Buonanotte.")
                 break
+            
+            # Handle study command
+            if user_input.lower().startswith("study"):
+                parts = user_input.split(" ", 1)
+                topic = parts[1] if len(parts) > 1 else None
+                await bot_brain.self_study(topic)
+                continue
                 
             response = await bot_brain.generate_response(user_input)
             print(f"\n{bot_brain.ai_name}: {response}")
