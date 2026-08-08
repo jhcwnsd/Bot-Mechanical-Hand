@@ -268,8 +268,8 @@ class VixonApp:
         self.chat_area.tag_config("user", foreground="#66B2FF")
         self.chat_area.tag_config("ai", foreground="#E0E0E0")
         self.chat_area.tag_config("system", foreground="#FFCC00")
-        self.chat_area.tag_config("thought", foreground="#888888", font=("Consolas", 9, "italic"))
-        self.chat_area.tag_config("learned", foreground="#00FF66", font=("Consolas", 9, "bold"))
+        self.chat_area.tag_config("thought", foreground="#888888")
+        self.chat_area.tag_config("learned", foreground="#00FF66")
         self.chat_area.configure(state=tk.DISABLED)
         
         # User input area
