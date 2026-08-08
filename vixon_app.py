@@ -63,6 +63,7 @@ class VixonApp:
         import random
         self.next_proactive_interval = random.randint(45, 120)
         self.is_thinking = False
+        self.memory_vars = {}
         
         self._init_db()
         self._load_settings()
@@ -238,6 +239,26 @@ class VixonApp:
         )
         self.proactive_cb.pack(side=tk.LEFT)
         
+        # Actions for ledger (Select all & Delete)
+        self.ledger_actions_frame = ctk.CTkFrame(self.left_panel, fg_color="transparent")
+        self.ledger_actions_frame.pack(fill=tk.X, padx=15, pady=(2, 5))
+        
+        self.select_all_btn = ctk.CTkButton(
+            self.ledger_actions_frame, text="SELECT ALL", font=("Consolas", 9, "bold"),
+            fg_color="#1E1E1E", border_color="#2E2E33", border_width=1,
+            text_color="#E0E0E0", hover_color="#2E2E33", width=80, height=22,
+            command=self._select_all_memories
+        )
+        self.select_all_btn.pack(side=tk.LEFT)
+        
+        self.delete_selected_btn = ctk.CTkButton(
+            self.ledger_actions_frame, text="DELETE SELECTED", font=("Consolas", 9, "bold"),
+            fg_color="#1E1E1E", border_color="#C82333", border_width=1,
+            text_color="#FF4D4D", hover_color="#8F141E", width=110, height=22,
+            command=self._delete_selected_memories
+        )
+        self.delete_selected_btn.pack(side=tk.RIGHT)
+        
         # Scrollable area for memories
         self.mem_scroll_frame = ctk.CTkScrollableFrame(
             self.left_panel, fg_color="#121214", scrollbar_button_color="#2E2E33",
@@ -383,6 +404,8 @@ class VixonApp:
                 placeholder.pack(pady=20)
                 return
                 
+            self.memory_vars.clear()
+            
             for row in rows:
                 m_id = row[0]
                 content = row[1]
@@ -391,23 +414,65 @@ class VixonApp:
                 card = ctk.CTkFrame(self.mem_scroll_frame, fg_color="#18181C", corner_radius=6, border_color="#2E2E33", border_width=1)
                 card.pack(fill=tk.X, pady=4, ipady=4)
                 
-                lbl = ctk.CTkLabel(card, text=content, font=("Consolas", 10), text_color="#E0E0E0", wraplength=230, anchor="w", justify="left")
-                lbl.pack(fill=tk.X, padx=10, pady=(4, 2))
+                # Checkbox for memory selection
+                var = tk.BooleanVar(value=False)
+                self.memory_vars[m_id] = var
+                
+                cb = ctk.CTkCheckBox(
+                    card, text="", variable=var, width=16, height=16,
+                    fg_color="#B51D29", border_color="#2E2E33", hover_color="#8F141E",
+                    corner_radius=4
+                )
+                cb.pack(side=tk.LEFT, padx=(8, 0), anchor=tk.N, pady=10)
+                
+                # Sub-frame for layout formatting
+                details_frame = ctk.CTkFrame(card, fg_color="transparent")
+                details_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 5))
+                
+                lbl = ctk.CTkLabel(details_frame, text=content, font=("Consolas", 10), text_color="#E0E0E0", wraplength=190, anchor="w", justify="left")
+                lbl.pack(fill=tk.X, padx=5, pady=(4, 2))
                 
                 # Visual strength bar representation
-                bar_frame = ctk.CTkFrame(card, fg_color="transparent")
-                bar_frame.pack(fill=tk.X, padx=10, pady=(2, 4))
+                bar_frame = ctk.CTkFrame(details_frame, fg_color="transparent")
+                bar_frame.pack(fill=tk.X, padx=5, pady=(2, 4))
                 
                 # Progress bar displaying visual memory strength
                 pbar = ctk.CTkProgressBar(bar_frame, progress_color="#FF4D4D", fg_color="#2A2A2E", height=6)
-                pbar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+                pbar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
                 pbar.set(max(0.0, min(1.0, strength)))
                 
-                pct_lbl = ctk.CTkLabel(bar_frame, text=f"{strength:.2f}", font=("Consolas", 9), text_color="#888888")
+                pct_lbl = ctk.CTkLabel(bar_frame, text=f"{strength:.2f}", font=("Consolas", 8), text_color="#888888")
                 pct_lbl.pack(side=tk.RIGHT)
                 
         except Exception as e:
             self._log_event(f"Error drawing memories panel: {e}")
+
+    def _select_all_memories(self):
+        if not self.memory_vars:
+            return
+        # If all are currently selected, deselect all. Otherwise, select all.
+        all_selected = all(var.get() for var in self.memory_vars.values())
+        target_val = not all_selected
+        for var in self.memory_vars.values():
+            var.set(target_val)
+
+    def _delete_selected_memories(self):
+        selected_ids = [m_id for m_id, var in self.memory_vars.items() if var.get()]
+        if not selected_ids:
+            self._log_event("No memories selected for deletion.")
+            return
+            
+        try:
+            with self.db_lock:
+                with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                    cursor = conn.cursor()
+                    placeholders = ",".join("?" for _ in selected_ids)
+                    cursor.execute(f"DELETE FROM memories WHERE id IN ({placeholders})", selected_ids)
+                    conn.commit()
+            self._log_event(f"Deleted {len(selected_ids)} memories from database.")
+            self._refresh_memories()
+        except Exception as e:
+            self._log_event(f"Failed to delete selected memories: {e}")
 
     def _process_queue(self):
         try:
