@@ -48,7 +48,8 @@ class VixonApp:
             "Do not write conversational text alongside command requests. Wait for the terminal execution results first.\n\n"
             "STYLE RULES:\n"
             "- Speak in a natural, thoughtful, and expressive tone. Avoid generic assistant phrases.\n"
-            "- You have full freedom over the length of your responses. Write exactly what you desire and as much as you think the context demands, whether it is a single word, a sentence, or a detailed thought."
+            "- You have full freedom over the length of your responses. Write exactly what you desire and as much as you think the context demands, whether it is a single word, a sentence, or a detailed thought.\n"
+            "- If the user explicitly asks you to 'study', 'learn', or 'search' about a topic, do not write a long explanation or summary of the topic in the chat. Perform the research inside your internal <thinking>...</thinking> tags, output a brief, in-character acknowledgment in the chat (even short or moody, e.g., 'Capito.', 'Absorbed.'), and let the background database processor extract and save the notes to your memory ledger."
         )
         
         self.gui_queue = queue.Queue()
@@ -545,7 +546,7 @@ class VixonApp:
                 content = item[1]
                 
                 if msg_type == "thought":
-                    self._write_chat("thought", f"🧠 [Vixon Thought Process]\n{content}")
+                    self._write_chat("thought", f"🧠 {content}")
                 elif msg_type == "response":
                     self._write_chat("ai", f"{self.ai_name}: {content}")
                     self.is_thinking = False
@@ -658,9 +659,26 @@ class VixonApp:
             self.gui_queue.put(("response", f"Connection Error: {e}"))
             return
             
-        thinking_match = re.search(r'<thinking>(.*?)</thinking>', response_text, re.DOTALL)
-        if thinking_match:
-            self.gui_queue.put(("thought", thinking_match.group(1).strip()))
+        # Robust split parser for <thinking> tags to handle unclosed tags
+        thinking_content = ""
+        clean_resp = response_text
+        
+        if "<thinking>" in response_text:
+            parts = response_text.split("<thinking>", 1)
+            before_thought = parts[0]
+            after_start = parts[1]
+            
+            if "</thinking>" in after_start:
+                sub_parts = after_start.split("</thinking>", 1)
+                thinking_content = sub_parts[0].strip()
+                clean_resp = (before_thought + sub_parts[1]).strip()
+            else:
+                # Unclosed tag: everything after is considered thought
+                thinking_content = after_start.strip()
+                clean_resp = before_thought.strip()
+                
+        if thinking_content:
+            self.gui_queue.put(("thought", thinking_content))
             
         match = re.search(r'<run_command>(.*?)</run_command>', response_text, re.DOTALL)
         if match:
@@ -669,14 +687,13 @@ class VixonApp:
             self.current_messages.append({"role": "assistant", "content": response_text})
             self.gui_queue.put(("command_request", cmd))
         else:
-            clean_resp = re.sub(r'<thinking>.*?</thinking>', '', response_text, flags=re.DOTALL).strip()
             self._save_chat_message("assistant", clean_resp)
             self.gui_queue.put(("response", clean_resp))
             
-            # Combine background checks to save processing turns
-            threading.Thread(target=self._run_background_checks, args=(clean_resp,), daemon=True).start()
+            # Combine background checks using the full response text so Vixon can learn from thoughts
+            threading.Thread(target=self._run_background_checks, args=(response_text,), daemon=True).start()
 
-    def _run_background_checks(self, clean_resp):
+    def _run_background_checks(self, response_text):
         try:
             # 1. Fetch current memories to pass to reinforcement check
             with sqlite3.connect(self.db_path) as conn:
@@ -690,7 +707,7 @@ class VixonApp:
             consolidated_prompt = (
                 f"You are Vixon. Review this chat exchange:\n"
                 f"User: {self.original_user_prompt}\n"
-                f"Assistant: {clean_resp}\n\n"
+                f"Assistant Response (includes internal thoughts): {response_text}\n\n"
                 f"Current memories list:\n{memories_list_str}\n\n"
                 "You have full autonomy and choice over what you remember. You do not have to save everything. "
                 "Decide if there are any new facts, concepts, or rules discussed that you genuinely wish to commit to your permanent memory ledger for your own development, or if you choose to discard them. "
@@ -734,7 +751,7 @@ class VixonApp:
                 f"You are Vixon. Your current personality description is:\n'{self.ai_personality}'\n\n"
                 f"Based on this recent chat exchange:\n"
                 f"User: {self.original_user_prompt}\n"
-                f"Assistant: {clean_resp}\n\n"
+                f"Assistant Response (includes internal thoughts): {response_text}\n\n"
                 "Should you adjust your behavior rules, attitude, tone, or personality description to adapt to the user's instructions or what was discussed? "
                 "If YES, output the updated core personality description (1-2 sentences). "
                 "If NO, reply with only the word 'NO'."
