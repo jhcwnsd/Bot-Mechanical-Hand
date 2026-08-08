@@ -124,6 +124,11 @@ class VixonApp:
                     cursor.execute("ALTER TABLE memories ADD COLUMN last_used TEXT")
                 except Exception:
                     pass
+            if "pinned" not in cols:
+                try:
+                    cursor.execute("ALTER TABLE memories ADD COLUMN pinned INTEGER DEFAULT 0")
+                except Exception:
+                    pass
             
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS chat_history (
@@ -239,25 +244,41 @@ class VixonApp:
         )
         self.proactive_cb.pack(side=tk.LEFT)
         
-        # Actions for ledger (Select all & Delete)
+        # Actions for ledger (Select all, Pin, Unpin & Delete)
         self.ledger_actions_frame = ctk.CTkFrame(self.left_panel, fg_color="transparent")
-        self.ledger_actions_frame.pack(fill=tk.X, padx=15, pady=(2, 5))
+        self.ledger_actions_frame.pack(fill=tk.X, padx=10, pady=(2, 5))
         
         self.select_all_btn = ctk.CTkButton(
-            self.ledger_actions_frame, text="SELECT ALL", font=("Consolas", 9, "bold"),
+            self.ledger_actions_frame, text="ALL", font=("Consolas", 9, "bold"),
             fg_color="#1E1E1E", border_color="#2E2E33", border_width=1,
-            text_color="#E0E0E0", hover_color="#2E2E33", width=80, height=22,
+            text_color="#E0E0E0", hover_color="#2E2E33", width=35, height=22,
             command=self._select_all_memories
         )
-        self.select_all_btn.pack(side=tk.LEFT)
+        self.select_all_btn.pack(side=tk.LEFT, padx=(0, 2))
+        
+        self.pin_selected_btn = ctk.CTkButton(
+            self.ledger_actions_frame, text="PIN/SAVE", font=("Consolas", 9, "bold"),
+            fg_color="#1E1E1E", border_color="#28A745", border_width=1,
+            text_color="#28A745", hover_color="#1E5E2F", width=65, height=22,
+            command=self._pin_selected_memories
+        )
+        self.pin_selected_btn.pack(side=tk.LEFT, padx=(2, 2))
+        
+        self.unpin_selected_btn = ctk.CTkButton(
+            self.ledger_actions_frame, text="UNPIN", font=("Consolas", 9, "bold"),
+            fg_color="#1E1E1E", border_color="#FFC107", border_width=1,
+            text_color="#FFC107", hover_color="#7F6000", width=48, height=22,
+            command=self._unpin_selected_memories
+        )
+        self.unpin_selected_btn.pack(side=tk.LEFT, padx=(2, 2))
         
         self.delete_selected_btn = ctk.CTkButton(
-            self.ledger_actions_frame, text="DELETE SELECTED", font=("Consolas", 9, "bold"),
+            self.ledger_actions_frame, text="DELETE", font=("Consolas", 9, "bold"),
             fg_color="#1E1E1E", border_color="#C82333", border_width=1,
-            text_color="#FF4D4D", hover_color="#8F141E", width=110, height=22,
+            text_color="#FF4D4D", hover_color="#8F141E", width=55, height=22,
             command=self._delete_selected_memories
         )
-        self.delete_selected_btn.pack(side=tk.RIGHT)
+        self.delete_selected_btn.pack(side=tk.RIGHT, padx=(2, 0))
         
         # Scrollable area for memories
         self.mem_scroll_frame = ctk.CTkScrollableFrame(
@@ -392,7 +413,7 @@ class VixonApp:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT id, content, strength FROM memories ORDER BY id DESC")
+                cursor.execute("SELECT id, content, strength, pinned FROM memories ORDER BY id DESC")
                 rows = cursor.fetchall()
                 
             # Clear old widgets in memory panel
@@ -410,8 +431,11 @@ class VixonApp:
                 m_id = row[0]
                 content = row[1]
                 strength = row[2]
+                pinned = row[3]
                 
-                card = ctk.CTkFrame(self.mem_scroll_frame, fg_color="#18181C", corner_radius=6, border_color="#2E2E33", border_width=1)
+                # Apply visual border styling differences if pinned
+                border_col = "#28A745" if pinned else "#2E2E33"
+                card = ctk.CTkFrame(self.mem_scroll_frame, fg_color="#18181C", corner_radius=6, border_color=border_col, border_width=1)
                 card.pack(fill=tk.X, pady=4, ipady=4)
                 
                 # Checkbox for memory selection
@@ -429,7 +453,8 @@ class VixonApp:
                 details_frame = ctk.CTkFrame(card, fg_color="transparent")
                 details_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 5))
                 
-                lbl = ctk.CTkLabel(details_frame, text=content, font=("Consolas", 10), text_color="#E0E0E0", wraplength=190, anchor="w", justify="left")
+                display_text = f"🔒 {content}" if pinned else content
+                lbl = ctk.CTkLabel(details_frame, text=display_text, font=("Consolas", 10), text_color="#E0E0E0", wraplength=190, anchor="w", justify="left")
                 lbl.pack(fill=tk.X, padx=5, pady=(4, 2))
                 
                 # Visual strength bar representation
@@ -437,11 +462,13 @@ class VixonApp:
                 bar_frame.pack(fill=tk.X, padx=5, pady=(2, 4))
                 
                 # Progress bar displaying visual memory strength
-                pbar = ctk.CTkProgressBar(bar_frame, progress_color="#FF4D4D", fg_color="#2A2A2E", height=6)
+                prog_color = "#28A745" if pinned else "#FF4D4D"
+                pbar = ctk.CTkProgressBar(bar_frame, progress_color=prog_color, fg_color="#2A2A2E", height=6)
                 pbar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-                pbar.set(max(0.0, min(1.0, strength)))
+                pbar.set(1.0 if pinned else max(0.0, min(1.0, strength)))
                 
-                pct_lbl = ctk.CTkLabel(bar_frame, text=f"{strength:.2f}", font=("Consolas", 8), text_color="#888888")
+                status_text = "Saved" if pinned else f"{strength:.2f}"
+                pct_lbl = ctk.CTkLabel(bar_frame, text=status_text, font=("Consolas", 8), text_color="#888888")
                 pct_lbl.pack(side=tk.RIGHT)
                 
         except Exception as e:
@@ -473,6 +500,42 @@ class VixonApp:
             self._refresh_memories()
         except Exception as e:
             self._log_event(f"Failed to delete selected memories: {e}")
+
+    def _pin_selected_memories(self):
+        selected_ids = [m_id for m_id, var in self.memory_vars.items() if var.get()]
+        if not selected_ids:
+            self._log_event("No memories selected to pin/save.")
+            return
+            
+        try:
+            with self.db_lock:
+                with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                    cursor = conn.cursor()
+                    placeholders = ",".join("?" for _ in selected_ids)
+                    cursor.execute(f"UPDATE memories SET pinned = 1, strength = 1.0 WHERE id IN ({placeholders})", selected_ids)
+                    conn.commit()
+            self._log_event(f"Pinned/Saved {len(selected_ids)} memories. They are now safe from decay.")
+            self._refresh_memories()
+        except Exception as e:
+            self._log_event(f"Failed to pin selected memories: {e}")
+
+    def _unpin_selected_memories(self):
+        selected_ids = [m_id for m_id, var in self.memory_vars.items() if var.get()]
+        if not selected_ids:
+            self._log_event("No memories selected to unpin.")
+            return
+            
+        try:
+            with self.db_lock:
+                with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                    cursor = conn.cursor()
+                    placeholders = ",".join("?" for _ in selected_ids)
+                    cursor.execute(f"UPDATE memories SET pinned = 0 WHERE id IN ({placeholders})", selected_ids)
+                    conn.commit()
+            self._log_event(f"Unpinned {len(selected_ids)} memories. They will now decay normally.")
+            self._refresh_memories()
+        except Exception as e:
+            self._log_event(f"Failed to unpin selected memories: {e}")
 
     def _process_queue(self):
         try:
@@ -704,8 +767,8 @@ class VixonApp:
                 with sqlite3.connect(self.db_path, timeout=30.0) as conn:
                     cursor = conn.cursor()
                     
-                    # Decay active memories by 0.05
-                    cursor.execute("UPDATE memories SET strength = strength - 0.05")
+                    # Decay active memories by 0.05 (pinned memories are exempt)
+                    cursor.execute("UPDATE memories SET strength = strength - 0.05 WHERE pinned = 0")
                     conn.commit()
                     
                     # Save new facts
@@ -729,13 +792,13 @@ class VixonApp:
                             
                     conn.commit()
                     
-                    # Delete decayed memories
-                    cursor.execute("SELECT content FROM memories WHERE strength <= 0.25")
+                    # Delete decayed memories (pinned memories are exempt)
+                    cursor.execute("SELECT content FROM memories WHERE strength <= 0.25 AND pinned = 0")
                     forgotten = cursor.fetchall()
                     if forgotten:
                         for f in forgotten:
                             self.gui_queue.put(("forgot", f[0]))
-                        cursor.execute("DELETE FROM memories WHERE strength <= 0.25")
+                        cursor.execute("DELETE FROM memories WHERE strength <= 0.25 AND pinned = 0")
                         conn.commit()
                     
         except Exception as e:
