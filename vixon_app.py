@@ -48,7 +48,7 @@ class VixonApp:
             "Do not write conversational text alongside command requests. Wait for the terminal execution results first.\n\n"
             "STYLE RULES:\n"
             "- Speak in a natural, thoughtful, and expressive tone. Avoid generic assistant phrases.\n"
-            "- Keep your final conversational replies clean and punchy, aiming for 2 to 4 sentences."
+            "- You have full freedom over the length of your responses. Write exactly what you desire and as much as you think the context demands, whether it is a single word, a sentence, or a detailed thought."
         )
         
         self.gui_queue = queue.Queue()
