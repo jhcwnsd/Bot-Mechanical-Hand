@@ -19,14 +19,14 @@ ctk.set_default_color_theme("dark-blue")
 class VixonApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("BLACK WALL TACTICAL HUD")
+        self.root.title("BLACK WALL COGNITIVE LINK")
         self.root.geometry("950x650")
         self.root.configure(bg="#0B0B0C")
         
         # Set AppUserModelID so Windows renders the custom icon separately on the taskbar
         try:
             import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("shin.chitsujo.vixon.ledger")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("shin.chitsujo.vixon.blackwall")
         except Exception:
             pass
             
@@ -429,7 +429,7 @@ class VixonApp:
         except Exception:
             pass
         
-        self.tab_memories = self.sidebar_tabs.add("LEDGER")
+        self.tab_memories = self.sidebar_tabs.add("WALL")
         self.tab_chats = self.sidebar_tabs.add("CHATS")
         
         # TAB 1: MEMORIES LEDGER & STUDY TOOLS
