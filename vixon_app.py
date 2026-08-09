@@ -20,7 +20,7 @@ class VixonApp:
     def __init__(self, root):
         self.root = root
         self.root.title("BLACK WALL COGNITIVE LINK")
-        self.root.geometry("950x650")
+        self.root.geometry("1200x680")
         self.root.configure(bg="#0B0B0C")
         
         # Set AppUserModelID so Windows renders the custom icon separately on the taskbar
@@ -97,12 +97,31 @@ class VixonApp:
         self.proactive_var = tk.BooleanVar(value=True)
         self.last_interaction_time = datetime.now()
         
+        # Face visualization parameters (Matrix style)
+        self.face_visible = True
+        self.face_state = "NEUTRAL"      # NEUTRAL, THINKING, TALKING
+        self.face_sentiment = "NEUTRAL"  # NEUTRAL, SMUG, STERN
+        self.face_color = "#FF4D4D"      # Crimson neon (default)
+        self.talk_reset_job = None
+        
         import random
+        self.matrix_rain = []
+        for i in range(15):
+            self.matrix_rain.append({
+                "x": i * 18 + 10,
+                "y": random.randint(-150, 300),
+                "speed": random.randint(4, 9),
+                "chars": [random.choice("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ@#$%&*") for _ in range(5)]
+            })
+        
         self.next_proactive_interval = random.randint(45, 120)
         self.is_thinking = False
         self.memory_vars = {}
         
         self._create_widgets()
+        
+        # Start face animation loop
+        self.root.after(50, self._animate_face)
         
         # Start queue reader loop
         self.root.after(100, self._process_queue)
@@ -396,6 +415,15 @@ class VixonApp:
         self.title_frame = ctk.CTkFrame(self.root, fg_color="#18181A", height=50, corner_radius=0)
         self.title_frame.pack(fill=tk.X, side=tk.TOP)
         
+        # Toggle face visualization panel button
+        self.toggle_face_btn = ctk.CTkButton(
+            self.title_frame, text="VISUALIZER: ON", font=("Consolas", 10, "bold"),
+            fg_color="#1E1E1E", border_color="#B51D29", border_width=1,
+            text_color="#FF4D4D", hover_color="#B51D29", width=120, height=28,
+            command=self._toggle_face_panel
+        )
+        self.toggle_face_btn.pack(side=tk.RIGHT, padx=15, pady=10)
+        
         self.title_lbl = ctk.CTkLabel(
             self.title_frame, text=f"▲  {self.ai_name.upper()} - BLACK WALL SYSTEM  ▲",
             font=("Consolas", 14, "bold"), text_color="#FF4D4D"
@@ -553,9 +581,57 @@ class VixonApp:
         self.log_textbox.pack(fill=tk.X, padx=10, pady=(0, 15))
         self.log_textbox.configure(state=tk.DISABLED)
         
-        # Right Panel (Dialogue & Chat Terminal)
+        # Center Panel (Dialogue & Chat Terminal)
         self.right_panel = ctk.CTkFrame(self.container, fg_color="#18181A", corner_radius=8)
-        self.right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        self.right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Right Panel (Matrix Face Interface)
+        self.face_panel = ctk.CTkFrame(self.container, fg_color="#18181A", width=280, corner_radius=8)
+        self.face_panel.pack(side=tk.RIGHT, fill=tk.BOTH, padx=(10, 0))
+        self.face_panel.pack_propagate(False)
+        
+        self.face_lbl = ctk.CTkLabel(
+            self.face_panel, text="▲ COGNITIVE FEED ▲",
+            font=("Consolas", 11, "bold"), text_color="#FF4D4D"
+        )
+        self.face_lbl.pack(pady=10)
+        
+        self.face_canvas = tk.Canvas(
+            self.face_panel, width=260, height=340, bg="#0B0B0C",
+            highlightthickness=1, highlightbackground="#2E2E33"
+        )
+        self.face_canvas.pack(padx=10, pady=5)
+        
+        # Color toggle button
+        self.color_toggle_btn = ctk.CTkButton(
+            self.face_panel, text="MATRIX GREEN", font=("Consolas", 10, "bold"),
+            fg_color="#1E1E1E", border_color="#2E2E33", border_width=1,
+            text_color="#E0E0E0", hover_color="#2E2E33", height=28,
+            command=self._toggle_face_color
+        )
+        self.color_toggle_btn.pack(fill=tk.X, padx=15, pady=5)
+        
+        # Diagnostics Display Panel
+        self.diagnostics_frame = ctk.CTkFrame(self.face_panel, fg_color="#121214", height=150, corner_radius=6, border_color="#2E2E33", border_width=1)
+        self.diagnostics_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(5, 10))
+        
+        self.diag_status_lbl = ctk.CTkLabel(
+            self.diagnostics_frame, text="CORE STATUS: ONLINE",
+            font=("Consolas", 9, "bold"), text_color="#28A745", anchor="w", justify="left"
+        )
+        self.diag_status_lbl.pack(fill=tk.X, padx=10, pady=(8, 2))
+        
+        self.diag_sentiment_lbl = ctk.CTkLabel(
+            self.diagnostics_frame, text="EMOTION STATE: CALM",
+            font=("Consolas", 9, "bold"), text_color="#888888", anchor="w", justify="left"
+        )
+        self.diag_sentiment_lbl.pack(fill=tk.X, padx=10, pady=2)
+        
+        self.diag_memory_lbl = ctk.CTkLabel(
+            self.diagnostics_frame, text="COGNITIVE CACHE: ACTIVE",
+            font=("Consolas", 9, "bold"), text_color="#888888", anchor="w", justify="left"
+        )
+        self.diag_memory_lbl.pack(fill=tk.X, padx=10, pady=2)
         
 
         
@@ -755,6 +831,8 @@ class VixonApp:
                 
                 if msg_type == "thought":
                     self._log_event(f"🧠 Thoughts: {content}")
+                    self.face_state = "THINKING"
+                    self.face_sentiment = "NEUTRAL"
                 elif msg_type == "delete_placeholder":
                     self._delete_thinking_placeholder()
                 elif msg_type == "response":
@@ -765,6 +843,7 @@ class VixonApp:
                     self.next_proactive_interval = random.randint(45, 120)
                     self.last_interaction_time = datetime.now()
                     self._async_refresh_memories()
+                    self._trigger_face_talking(content)
                 elif msg_type == "log":
                     self._log_event(content)
                 elif msg_type == "settings_loaded":
@@ -853,6 +932,8 @@ class VixonApp:
         self.next_proactive_interval = random.randint(45, 120)
         self.last_interaction_time = datetime.now()
         self.is_thinking = True
+        self.face_state = "THINKING"
+        self.face_sentiment = "NEUTRAL"
         
         threading.Thread(target=self._query_pipeline_thread, args=(text,), daemon=True).start()
 
@@ -1699,6 +1780,246 @@ class VixonApp:
         
         # Trigger autonomous background checks to allow learning from proactive thoughts
         threading.Thread(target=self._run_background_checks, args=(clean_resp,), daemon=True).start()
+
+    def _toggle_face_panel(self):
+        if self.face_visible:
+            self.face_panel.pack_forget()
+            self.toggle_face_btn.configure(text="VISUALIZER: OFF", border_color="#2E2E33", text_color="#888888")
+            self.face_visible = False
+        else:
+            self.face_panel.pack(side=tk.RIGHT, fill=tk.BOTH, padx=(10, 0))
+            self.toggle_face_btn.configure(text="VISUALIZER: ON", border_color="#B51D29", text_color="#FF4D4D")
+            self.face_visible = True
+
+    def _toggle_face_color(self):
+        if self.face_color == "#FF4D4D":
+            self.face_color = "#00FF66" # Neon green
+            self.color_toggle_btn.configure(text="CRIMSON CORE", border_color="#B51D29", text_color="#FF4D4D")
+            self.face_lbl.configure(text_color="#00FF66")
+        else:
+            self.face_color = "#FF4D4D" # Crimson red
+            self.color_toggle_btn.configure(text="MATRIX GREEN", border_color="#2E2E33", text_color="#E0E0E0")
+            self.face_lbl.configure(text_color="#FF4D4D")
+
+    def _trigger_face_talking(self, text):
+        if self.talk_reset_job:
+            self.root.after_cancel(self.talk_reset_job)
+            
+        lower_text = text.lower()
+        if any(w in lower_text for w in ["cazzo", "merda", "violento", "consigliere", "kill", "die", "destroy", "denied", "gun", "blood", "threat", "fight", "death"]):
+            self.face_sentiment = "STERN"
+        elif any(w in lower_text for w in ["grazie", "don", "bene", "prego", "carissimo", "friend", "loyal", "respect", "honor", "salute", "welcome", "good"]):
+            self.face_sentiment = "SMUG"
+        else:
+            self.face_sentiment = "NEUTRAL"
+            
+        self.face_state = "TALKING"
+        duration = max(1500, min(10000, len(text) * 45))
+        self.talk_reset_job = self.root.after(duration, self._reset_face_idle)
+
+    def _reset_face_idle(self):
+        self.face_state = "NEUTRAL"
+        self.talk_reset_job = None
+
+    def _animate_face(self):
+        if not self.face_visible:
+            self.root.after(50, self._animate_face)
+            return
+            
+        try:
+            self.face_canvas.delete("all")
+            import random
+            import math
+            import time
+            
+            w = 260
+            h = 340
+            
+            # 1. Update and Draw falling Matrix rain background columns
+            for col in self.matrix_rain:
+                col["y"] += col["speed"]
+                if col["y"] > h + 50:
+                    col["y"] = random.randint(-120, 0)
+                    col["speed"] = random.randint(4, 9)
+                    
+                # Draw vertical characters stream
+                for idx, ch in enumerate(col["chars"]):
+                    y_offset = col["y"] - (idx * 16)
+                    if 0 <= y_offset <= h:
+                        # Fade colors up the stream
+                        alpha_col = self.face_color
+                        if idx > 0:
+                            # Dim color for trail characters
+                            alpha_col = "#7F1F1F" if self.face_color == "#FF4D4D" else "#005511"
+                        self.face_canvas.create_text(col["x"], y_offset, text=ch, font=("Consolas", 10), fill=alpha_col)
+                        
+                # Randomly mutate characters to simulate live decoding
+                if random.random() < 0.15:
+                    col["chars"][random.randint(0, 4)] = random.choice("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ@#$%&*")
+
+            # 2. Render digital matrix face wireframe grid
+            cx = w // 2
+            cy = h // 2 - 20
+            
+            # Base variables for animations
+            breathing = math.sin(time.time() * 2.0) * 0.02
+            scale = 1.0 + breathing
+            
+            glitch_x = 0
+            glitch_y = 0
+            if self.face_state == "THINKING":
+                # Rapid visual glitch shifts
+                if random.random() < 0.3:
+                    glitch_x = random.randint(-3, 3)
+                    glitch_y = random.randint(-2, 2)
+                scale = 0.98 + random.random() * 0.04
+                self.diag_status_lbl.configure(text="CORE STATUS: COMPUTING...", text_color="#FFC107")
+            elif self.face_state == "TALKING":
+                self.diag_status_lbl.configure(text="CORE STATUS: TRANSMITTING", text_color="#00FF66" if self.face_color == "#00FF66" else "#3399FF")
+            else:
+                self.diag_status_lbl.configure(text="CORE STATUS: ONLINE", text_color="#28A745")
+
+            # Update Diagnostics sentiment labels
+            if self.face_sentiment == "SMUG":
+                self.diag_sentiment_lbl.configure(text="EMOTION STATE: SATISFIED")
+            elif self.face_sentiment == "STERN":
+                self.diag_sentiment_lbl.configure(text="EMOTION STATE: STERN")
+            else:
+                self.diag_sentiment_lbl.configure(text="EMOTION STATE: CALM")
+
+            # Wireframe face coordinate map centered at (cx, cy)
+            # Standard Male Matrix facial proportions
+            nodes = {
+                "chin": (0, 110),
+                "jaw_l": (-45, 75),
+                "jaw_r": (45, 75),
+                "cheek_l": (-65, 10),
+                "cheek_r": (65, 10),
+                "temple_l": (-60, -45),
+                "temple_r": (60, -45),
+                "forehead_l": (-35, -80),
+                "forehead_r": (35, -80),
+                "top": (0, -95),
+                "nose_bridge": (0, -25),
+                "nose_tip": (0, 20),
+                "nose_l": (-14, 25),
+                "nose_r": (14, 25)
+            }
+            
+            # Map dynamic screen coordinates
+            coords = {}
+            for name, (nx, ny) in nodes.items():
+                # Apply scaling and translations
+                dx = cx + int(nx * scale) + glitch_x
+                dy = cy + int(ny * scale) + glitch_y
+                coords[name] = (dx, dy)
+                
+            # Draw facial structural outline connections (Matrix lines)
+            outline_paths = [
+                ["top", "forehead_l", "temple_l", "cheek_l", "jaw_l", "chin", "jaw_r", "cheek_r", "temple_r", "forehead_r", "top"],
+                ["forehead_l", "forehead_r"],
+                ["temple_l", "nose_bridge", "temple_r"],
+                ["cheek_l", "nose_tip", "cheek_r"],
+                ["nose_bridge", "nose_tip", "nose_l", "nose_r", "nose_tip"]
+            ]
+            
+            for path in outline_paths:
+                points = []
+                for node in path:
+                    points.extend(coords[node])
+                self.face_canvas.create_line(points, fill=self.face_color, width=1)
+                
+            # Render glowing nodes points
+            node_r = 3
+            for name, (dx, dy) in coords.items():
+                pulse_r = node_r + (1 if math.sin(time.time() * 4.0 + dx) > 0 else 0)
+                self.face_canvas.create_oval(dx - pulse_r, dy - pulse_r, dx + pulse_r, dy + pulse_r, fill=self.face_color, outline="")
+
+            # Draw Eyes (Highly styled Matrix scan lines)
+            eye_y = cy - 25
+            eye_w = 25
+            eye_h = 6
+            eye_l_cx = cx - 30
+            eye_r_cx = cx + 30
+            
+            # Blink logic: blink every 4 seconds for 150ms
+            is_blinking = int(time.time()) % 4 == 0 and time.time() % 1.0 < 0.15
+            if is_blinking and self.face_state != "THINKING":
+                # Render closed eye lines
+                self.face_canvas.create_line(eye_l_cx - eye_w//2, eye_y, eye_l_cx + eye_w//2, eye_y, fill=self.face_color, width=2)
+                self.face_canvas.create_line(eye_r_cx - eye_w//2, eye_y, eye_r_cx + eye_w//2, eye_y, fill=self.face_color, width=2)
+            else:
+                # Dynamic open eye heights based on state/emotion
+                cur_eye_h = eye_h
+                if self.face_state == "THINKING" or self.face_sentiment == "STERN":
+                    cur_eye_h = 3 # narrowed
+                    
+                # Left Eye box
+                self.face_canvas.create_rectangle(
+                    eye_l_cx - eye_w//2, eye_y - cur_eye_h//2, eye_l_cx + eye_w//2, eye_y + cur_eye_h//2,
+                    outline=self.face_color, fill="", width=1.5
+                )
+                # Right Eye box
+                self.face_canvas.create_rectangle(
+                    eye_r_cx - eye_w//2, eye_y - cur_eye_h//2, eye_r_cx + eye_w//2, eye_y + cur_eye_h//2,
+                    outline=self.face_color, fill="", width=1.5
+                )
+                # Glowing center pupil points
+                self.face_canvas.create_oval(eye_l_cx-1, eye_y-1, eye_l_cx+1, eye_y+1, fill=self.face_color)
+                self.face_canvas.create_oval(eye_r_cx-1, eye_y-1, eye_r_cx+1, eye_y+1, fill=self.face_color)
+
+            # Draw Eyebrows (Slanted based on emotion)
+            brow_y = eye_y - 12
+            brow_w = 24
+            if self.face_sentiment == "STERN":
+                # Furrowed eyebrows (tilt down towards center)
+                self.face_canvas.create_line(eye_l_cx - brow_w//2, brow_y - 3, eye_l_cx + brow_w//2, brow_y + 2, fill=self.face_color, width=2)
+                self.face_canvas.create_line(eye_r_cx - brow_w//2, brow_y + 2, eye_r_cx + brow_w//2, brow_y - 3, fill=self.face_color, width=2)
+            elif self.face_sentiment == "SMUG":
+                # Smug arched eyebrows
+                self.face_canvas.create_line(eye_l_cx - brow_w//2, brow_y + 1, eye_l_cx + brow_w//2, brow_y - 2, fill=self.face_color, width=2)
+                self.face_canvas.create_line(eye_r_cx - brow_w//2, brow_y - 2, eye_r_cx + brow_w//2, brow_y + 1, fill=self.face_color, width=2)
+            else:
+                # Neutral straight eyebrows
+                self.face_canvas.create_line(eye_l_cx - brow_w//2, brow_y, eye_l_cx + brow_w//2, brow_y, fill=self.face_color, width=2)
+                self.face_canvas.create_line(eye_r_cx - brow_w//2, brow_y, eye_r_cx + brow_w//2, brow_y, fill=self.face_color, width=2)
+
+            # Draw Mouth (Lip sync & emotional curves)
+            mouth_y = cy + 45
+            mouth_w = 34
+            
+            if self.face_state == "TALKING":
+                # Talking lip-sync animation
+                mouth_open = random.randint(3, 10)
+                # Outer mouth oval shape moving
+                self.face_canvas.create_oval(
+                    cx - mouth_w//2, mouth_y - mouth_open//2, cx + mouth_w//2, mouth_y + mouth_open//2,
+                    outline=self.face_color, fill="", width=1.5
+                )
+                # Inner line
+                self.face_canvas.create_line(cx - mouth_w//2, mouth_y, cx + mouth_w//2, mouth_y, fill=self.face_color)
+            else:
+                # Static expressions
+                if self.face_sentiment == "SMUG":
+                    # Smug smile (arc curve upward)
+                    self.face_canvas.create_arc(
+                        cx - mouth_w//2, mouth_y - 12, cx + mouth_w//2, mouth_y + 3,
+                        start=190, extent=160, style=tk.ARC, outline=self.face_color, width=2
+                    )
+                elif self.face_sentiment == "STERN":
+                    # Angry frown (arc curve downward)
+                    self.face_canvas.create_arc(
+                        cx - mouth_w//2, mouth_y + 1, cx + mouth_w//2, mouth_y + 16,
+                        start=10, extent=160, style=tk.ARC, outline=self.face_color, width=2
+                    )
+                else:
+                    # Neutral straight line mouth
+                    self.face_canvas.create_line(cx - mouth_w//2, mouth_y, cx + mouth_w//2, mouth_y, fill=self.face_color, width=2)
+                    
+        except Exception as e:
+            pass
+            
+        self.root.after(50, self._animate_face)
 
 if __name__ == "__main__":
     db_path = "personal_brain.db"
