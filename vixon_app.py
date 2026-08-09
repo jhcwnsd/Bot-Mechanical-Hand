@@ -240,6 +240,46 @@ class VixonApp:
         except Exception as e:
             self.gui_queue.put(("log", f"Failed to preload chat history: {e}"))
 
+    def _draw_chat_history(self, messages):
+        try:
+            self.chat_area.configure(state=tk.NORMAL)
+            self.chat_area.delete("1.0", tk.END)
+            
+            # Format and insert all messages in a single batch
+            for msg in messages:
+                role = msg["role"]
+                text_val = msg["content"]
+                
+                if role == "user":
+                    display_content = text_val
+                    if display_content.startswith("[User Context:"):
+                        parts = display_content.split("]\n", 1)
+                        if len(parts) > 1:
+                            display_content = parts[1]
+                    self.chat_area.insert(tk.END, f"\nYou: {display_content}\n", "user")
+                    
+                elif role == "assistant":
+                    display_content = text_val
+                    if "<thinking>" in text_val:
+                        parts = text_val.split("<thinking>", 1)
+                        before = parts[0]
+                        after = parts[1]
+                        if "</thinking>" in after:
+                            sub = after.split("</thinking>", 1)
+                            display_content = (before + sub[1]).strip()
+                        else:
+                            display_content = before.strip()
+                    if display_content:
+                        self.chat_area.insert(tk.END, f"\n{self.ai_name}: {display_content}\n", "ai")
+                        
+                elif role == "system":
+                    self.chat_area.insert(tk.END, f"\n{text_val}\n", "system")
+                    
+            self.chat_area.see(tk.END)
+            self.chat_area.configure(state=tk.DISABLED)
+        except Exception as e:
+            self._log_event(f"Error rendering chat history: {e}")
+
     def _switch_session(self, val):
         self.current_session = val
         self.chat_area.configure(state=tk.NORMAL)
@@ -731,29 +771,7 @@ class VixonApp:
                 elif msg_type == "history_loaded":
                     self._delete_thinking_placeholder()
                     self.chat_history_cache = list(content)
-                    for msg in content:
-                        role = msg["role"]
-                        text_val = msg["content"]
-                        if role == "user":
-                            display_content = text_val
-                            if display_content.startswith("[User Context:"):
-                                parts = display_content.split("]\n", 1)
-                                if len(parts) > 1:
-                                    display_content = parts[1]
-                            self._write_chat("user", f"You: {display_content}")
-                        elif role == "assistant":
-                            display_content = text_val
-                            if "<thinking>" in text_val:
-                                parts = text_val.split("<thinking>", 1)
-                                before = parts[0]
-                                after = parts[1]
-                                if "</thinking>" in after:
-                                    sub = after.split("</thinking>", 1)
-                                    display_content = (before + sub[1]).strip()
-                                else:
-                                    display_content = before.strip()
-                            if display_content:
-                                self._write_chat("ai", f"{self.ai_name}: {display_content}")
+                    self._draw_chat_history(content)
                 elif msg_type == "sessions_loaded":
                     sessions, active_session = content
                     if "default" not in sessions:
