@@ -1846,10 +1846,9 @@ class VixonApp:
                 for idx, ch in enumerate(col["chars"]):
                     y_offset = col["y"] - (idx * 16)
                     if 0 <= y_offset <= h:
-                        # Fade colors up the stream
+                        # Dim color for trail characters
                         alpha_col = self.face_color
                         if idx > 0:
-                            # Dim color for trail characters
                             alpha_col = "#7F1F1F" if self.face_color == "#FF4D4D" else "#005511"
                         self.face_canvas.create_text(col["x"], y_offset, text=ch, font=("Consolas", 10), fill=alpha_col)
                         
@@ -1857,19 +1856,20 @@ class VixonApp:
                 if random.random() < 0.15:
                     col["chars"][random.randint(0, 4)] = random.choice("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ@#$%&*")
 
-            # 2. Render digital matrix face wireframe grid
+            # 2. Render Sculpted Roman Emperor Cyber-Wireframe Face
             cx = w // 2
-            cy = h // 2 - 20
+            cy = h // 2 - 25
             
-            # Base variables for animations
-            breathing = math.sin(time.time() * 2.0) * 0.02
+            # Idle breathing & subtle 3D rotational oscillation
+            t = time.time()
+            breathing = math.sin(t * 1.8) * 0.025
             scale = 1.0 + breathing
             
+            # Visual glitch shifts during thinking
             glitch_x = 0
             glitch_y = 0
             if self.face_state == "THINKING":
-                # Rapid visual glitch shifts
-                if random.random() < 0.3:
+                if random.random() < 0.35:
                     glitch_x = random.randint(-3, 3)
                     glitch_y = random.randint(-2, 2)
                 scale = 0.98 + random.random() * 0.04
@@ -1877,50 +1877,129 @@ class VixonApp:
             elif self.face_state == "TALKING":
                 self.diag_status_lbl.configure(text="CORE STATUS: TRANSMITTING", text_color="#00FF66" if self.face_color == "#00FF66" else "#3399FF")
             else:
-                self.diag_status_lbl.configure(text="CORE STATUS: ONLINE", text_color="#28A745")
+                self.diag_status_lbl.configure(text="CORE STATUS: IMPERIAL ONLINE", text_color="#28A745")
 
             # Update Diagnostics sentiment labels
             if self.face_sentiment == "SMUG":
-                self.diag_sentiment_lbl.configure(text="EMOTION STATE: SATISFIED")
+                self.diag_sentiment_lbl.configure(text="EMOTION STATE: SATISFIED (IMPERIAL)")
             elif self.face_sentiment == "STERN":
-                self.diag_sentiment_lbl.configure(text="EMOTION STATE: STERN")
+                self.diag_sentiment_lbl.configure(text="EMOTION STATE: STERN (IMPERIAL)")
             else:
-                self.diag_sentiment_lbl.configure(text="EMOTION STATE: CALM")
+                self.diag_sentiment_lbl.configure(text="EMOTION STATE: CALM (IMPERIAL)")
 
-            # Wireframe face coordinate map centered at (cx, cy)
-            # Standard Male Matrix facial proportions
+            # --- ROMAN EMPEROR MASCULINE FACIAL NODES (3D MESH PROJECTION) ---
+            # Chiseled square jaw, aquiline nose, prominent brow, zygomatic arch & laurel crown
             nodes = {
-                "chin": (0, 110),
-                "jaw_l": (-45, 75),
-                "jaw_r": (45, 75),
-                "cheek_l": (-65, 10),
-                "cheek_r": (65, 10),
-                "temple_l": (-60, -45),
-                "temple_r": (60, -45),
-                "forehead_l": (-35, -80),
-                "forehead_r": (35, -80),
-                "top": (0, -95),
-                "nose_bridge": (0, -25),
-                "nose_tip": (0, 20),
-                "nose_l": (-14, 25),
-                "nose_r": (14, 25)
+                # Imperial Laurel Wreath Crown (Forehead/Head)
+                "crown_top": (0, -118),
+                "wreath_peak_l": (-28, -112),
+                "wreath_peak_r": (28, -112),
+                "wreath_leaf_l1": (-58, -100),
+                "wreath_leaf_r1": (58, -100),
+                "wreath_leaf_l2": (-78, -78),
+                "wreath_leaf_r2": (78, -78),
+                
+                # Forehead & Temples
+                "forehead_center": (0, -88),
+                "forehead_l": (-42, -84),
+                "forehead_r": (42, -84),
+                "temple_l": (-68, -55),
+                "temple_r": (68, -55),
+                
+                # Heavy Roman Brow Ridge (Superciliary Arch)
+                "glabella": (0, -42),
+                "brow_peak_l": (-32, -45),
+                "brow_peak_r": (32, -45),
+                "brow_outer_l": (-58, -42),
+                "brow_outer_r": (58, -42),
+                
+                # Deep Eye Sockets & Orbital Rim Corners
+                "eye_in_l": (-16, -26),
+                "eye_out_l": (-48, -26),
+                "eye_in_r": (16, -26),
+                "eye_out_r": (48, -26),
+                
+                # High Zygomatic Arches (Chiseled Cheekbones)
+                "cheek_high_l": (-66, -12),
+                "cheek_high_r": (66, -12),
+                "cheek_arch_l": (-72, 18),
+                "cheek_arch_r": (72, 18),
+                "cheek_hollow_l": (-46, 32),
+                "cheek_hollow_r": (46, 32),
+                
+                # Aquiline Roman Nose Structure
+                "nose_root": (0, -38),
+                "nose_bridge_mid": (0, -10),
+                "nose_bridge_low": (0, 14),
+                "nose_tip": (0, 24),
+                "nose_wing_l": (-18, 22),
+                "nose_wing_r": (18, 22),
+                "philtrum_top": (0, 34),
+                
+                # Chiseled Square Jaw & Heavy Mandible (Statue Base)
+                "jaw_angle_l": (-64, 68),
+                "jaw_angle_r": (64, 68),
+                "jaw_mid_l": (-48, 92),
+                "jaw_mid_r": (48, 92),
+                "chin_corner_l": (-22, 114),
+                "chin_corner_r": (22, 114),
+                "chin_base": (0, 118),
+                
+                # Muscular Roman Bust Neck & Trapezius Outline
+                "neck_top_l": (-45, 96),
+                "neck_top_r": (45, 96),
+                "neck_mid_l": (-52, 136),
+                "neck_mid_r": (52, 136),
+                "trapezius_l": (-80, 156),
+                "trapezius_r": (80, 156),
+                "sternum": (0, 158)
             }
             
             # Map dynamic screen coordinates
             coords = {}
             for name, (nx, ny) in nodes.items():
-                # Apply scaling and translations
                 dx = cx + int(nx * scale) + glitch_x
                 dy = cy + int(ny * scale) + glitch_y
                 coords[name] = (dx, dy)
                 
-            # Draw facial structural outline connections (Matrix lines)
+            # Wireframe Mesh Polygons (Sculpted Facets)
             outline_paths = [
-                ["top", "forehead_l", "temple_l", "cheek_l", "jaw_l", "chin", "jaw_r", "cheek_r", "temple_r", "forehead_r", "top"],
-                ["forehead_l", "forehead_r"],
-                ["temple_l", "nose_bridge", "temple_r"],
-                ["cheek_l", "nose_tip", "cheek_r"],
-                ["nose_bridge", "nose_tip", "nose_l", "nose_r", "nose_tip"]
+                # Laurel Wreath & Imperial Hairline
+                ["crown_top", "wreath_peak_l", "wreath_leaf_l1", "wreath_leaf_l2", "temple_l"],
+                ["crown_top", "wreath_peak_r", "wreath_leaf_r1", "wreath_leaf_r2", "temple_r"],
+                ["wreath_peak_l", "forehead_center", "wreath_peak_r"],
+                ["wreath_leaf_l1", "forehead_l", "forehead_center", "forehead_r", "wreath_leaf_r1"],
+                ["wreath_leaf_l1", "brow_peak_l"], ["wreath_leaf_r1", "brow_peak_r"],
+                
+                # Forehead & Heavy Brow Ridge
+                ["temple_l", "brow_outer_l", "brow_peak_l", "glabella", "brow_peak_r", "brow_outer_r", "temple_r"],
+                ["forehead_center", "glabella"],
+                ["forehead_l", "brow_peak_l"], ["forehead_r", "brow_peak_r"],
+                
+                # Orbital Sockets & High Cheekbones
+                ["brow_outer_l", "eye_out_l", "eye_in_l", "glabella"],
+                ["brow_outer_r", "eye_out_r", "eye_in_r", "glabella"],
+                ["eye_out_l", "cheek_high_l", "eye_in_l"],
+                ["eye_out_r", "cheek_high_r", "eye_in_r"],
+                
+                # Aquiline Roman Nose
+                ["glabella", "nose_root", "nose_bridge_mid", "nose_bridge_low", "nose_tip", "philtrum_top"],
+                ["eye_in_l", "nose_root", "eye_in_r"],
+                ["eye_in_l", "nose_bridge_mid", "nose_wing_l", "nose_tip", "nose_wing_r", "nose_bridge_mid", "eye_in_r"],
+                ["nose_bridge_low", "nose_wing_l"], ["nose_bridge_low", "nose_wing_r"],
+                
+                # Chiseled Mandible & Hollow Cheeks
+                ["temple_l", "cheek_high_l", "cheek_arch_l", "jaw_angle_l", "jaw_mid_l", "chin_corner_l", "chin_base", "chin_corner_r", "jaw_mid_r", "jaw_angle_r", "cheek_arch_r", "cheek_high_r", "temple_r"],
+                ["cheek_high_l", "cheek_hollow_l", "jaw_mid_l"],
+                ["cheek_high_r", "cheek_hollow_r", "jaw_mid_r"],
+                ["nose_wing_l", "cheek_hollow_l", "chin_corner_l"],
+                ["nose_wing_r", "cheek_hollow_r", "chin_corner_r"],
+                ["philtrum_top", "chin_corner_l"], ["philtrum_top", "chin_corner_r"],
+                
+                # Muscular Roman Bust Neck & Base
+                ["jaw_angle_l", "neck_mid_l", "trapezius_l", "sternum", "trapezius_r", "neck_mid_r", "jaw_angle_r"],
+                ["chin_base", "sternum"],
+                ["neck_top_l", "neck_mid_l"], ["neck_top_r", "neck_mid_r"]
             ]
             
             for path in outline_paths:
@@ -1929,92 +2008,96 @@ class VixonApp:
                     points.extend(coords[node])
                 self.face_canvas.create_line(points, fill=self.face_color, width=1)
                 
-            # Render glowing nodes points
+            # Render glowing wireframe vertex nodes
             node_r = 3
             for name, (dx, dy) in coords.items():
-                pulse_r = node_r + (1 if math.sin(time.time() * 4.0 + dx) > 0 else 0)
+                pulse_r = node_r + (1 if math.sin(t * 4.0 + dx) > 0 else 0)
                 self.face_canvas.create_oval(dx - pulse_r, dy - pulse_r, dx + pulse_r, dy + pulse_r, fill=self.face_color, outline="")
 
-            # Draw Eyes (Highly styled Matrix scan lines)
-            eye_y = cy - 25
-            eye_w = 25
-            eye_h = 6
+            # --- DEEP SET ROMAN EYES (CYBER-STATUE GLOW) ---
+            eye_y = cy - 26
+            eye_w = 26
+            eye_h = 7
             eye_l_cx = cx - 30
             eye_r_cx = cx + 30
             
             # Blink logic: blink every 4 seconds for 150ms
-            is_blinking = int(time.time()) % 4 == 0 and time.time() % 1.0 < 0.15
+            is_blinking = int(t) % 4 == 0 and t % 1.0 < 0.15
             if is_blinking and self.face_state != "THINKING":
-                # Render closed eye lines
+                # Render closed eyelids
                 self.face_canvas.create_line(eye_l_cx - eye_w//2, eye_y, eye_l_cx + eye_w//2, eye_y, fill=self.face_color, width=2)
                 self.face_canvas.create_line(eye_r_cx - eye_w//2, eye_y, eye_r_cx + eye_w//2, eye_y, fill=self.face_color, width=2)
             else:
-                # Dynamic open eye heights based on state/emotion
                 cur_eye_h = eye_h
                 if self.face_state == "THINKING" or self.face_sentiment == "STERN":
-                    cur_eye_h = 3 # narrowed
+                    cur_eye_h = 3 # narrowed stern glare
                     
-                # Left Eye box
+                # Left & Right Rectangular Cyber-Eyes
                 self.face_canvas.create_rectangle(
                     eye_l_cx - eye_w//2, eye_y - cur_eye_h//2, eye_l_cx + eye_w//2, eye_y + cur_eye_h//2,
                     outline=self.face_color, fill="", width=1.5
                 )
-                # Right Eye box
                 self.face_canvas.create_rectangle(
                     eye_r_cx - eye_w//2, eye_y - cur_eye_h//2, eye_r_cx + eye_w//2, eye_y + cur_eye_h//2,
                     outline=self.face_color, fill="", width=1.5
                 )
-                # Glowing center pupil points
-                self.face_canvas.create_oval(eye_l_cx-1, eye_y-1, eye_l_cx+1, eye_y+1, fill=self.face_color)
-                self.face_canvas.create_oval(eye_r_cx-1, eye_y-1, eye_r_cx+1, eye_y+1, fill=self.face_color)
+                # Glowing pupil cores
+                self.face_canvas.create_oval(eye_l_cx-2, eye_y-2, eye_l_cx+2, eye_y+2, fill=self.face_color)
+                self.face_canvas.create_oval(eye_r_cx-2, eye_y-2, eye_r_cx+2, eye_y+2, fill=self.face_color)
 
-            # Draw Eyebrows (Slanted based on emotion)
-            brow_y = eye_y - 12
-            brow_w = 24
+            # --- STERN ROMAN EYEBROWS ---
+            brow_y = eye_y - 13
+            brow_w = 26
             if self.face_sentiment == "STERN":
-                # Furrowed eyebrows (tilt down towards center)
-                self.face_canvas.create_line(eye_l_cx - brow_w//2, brow_y - 3, eye_l_cx + brow_w//2, brow_y + 2, fill=self.face_color, width=2)
-                self.face_canvas.create_line(eye_r_cx - brow_w//2, brow_y + 2, eye_r_cx + brow_w//2, brow_y - 3, fill=self.face_color, width=2)
+                # Deeply furrowed imperial brows
+                self.face_canvas.create_line(eye_l_cx - brow_w//2, brow_y - 4, eye_l_cx + brow_w//2, brow_y + 3, fill=self.face_color, width=2.5)
+                self.face_canvas.create_line(eye_r_cx - brow_w//2, brow_y + 3, eye_r_cx + brow_w//2, brow_y - 4, fill=self.face_color, width=2.5)
             elif self.face_sentiment == "SMUG":
-                # Smug arched eyebrows
-                self.face_canvas.create_line(eye_l_cx - brow_w//2, brow_y + 1, eye_l_cx + brow_w//2, brow_y - 2, fill=self.face_color, width=2)
-                self.face_canvas.create_line(eye_r_cx - brow_w//2, brow_y - 2, eye_r_cx + brow_w//2, brow_y + 1, fill=self.face_color, width=2)
+                # Arched confident imperial brows
+                self.face_canvas.create_line(eye_l_cx - brow_w//2, brow_y + 2, eye_l_cx + brow_w//2, brow_y - 3, fill=self.face_color, width=2.5)
+                self.face_canvas.create_line(eye_r_cx - brow_w//2, brow_y - 3, eye_r_cx + brow_w//2, brow_y + 2, fill=self.face_color, width=2.5)
             else:
-                # Neutral straight eyebrows
+                # Stoic straight Roman brow ridge
                 self.face_canvas.create_line(eye_l_cx - brow_w//2, brow_y, eye_l_cx + brow_w//2, brow_y, fill=self.face_color, width=2)
                 self.face_canvas.create_line(eye_r_cx - brow_w//2, brow_y, eye_r_cx + brow_w//2, brow_y, fill=self.face_color, width=2)
 
-            # Draw Mouth (Lip sync & emotional curves)
-            mouth_y = cy + 45
-            mouth_w = 34
+            # --- MASCULINE SCULPTED LIPS & LIP-SYNC ---
+            mouth_y = cy + 46
+            mouth_w = 36
             
             if self.face_state == "TALKING":
-                # Talking lip-sync animation
-                mouth_open = random.randint(3, 10)
-                # Outer mouth oval shape moving
-                self.face_canvas.create_oval(
-                    cx - mouth_w//2, mouth_y - mouth_open//2, cx + mouth_w//2, mouth_y + mouth_open//2,
+                # Dynamic speech lip sync
+                mouth_open = random.randint(4, 12)
+                # Upper and lower lip contours moving in sync
+                self.face_canvas.create_polygon(
+                    cx - mouth_w//2, mouth_y,
+                    cx - 10, mouth_y - mouth_open//2 - 2,
+                    cx + 10, mouth_y - mouth_open//2 - 2,
+                    cx + mouth_w//2, mouth_y,
+                    cx + 10, mouth_y + mouth_open//2 + 2,
+                    cx - 10, mouth_y + mouth_open//2 + 2,
                     outline=self.face_color, fill="", width=1.5
                 )
-                # Inner line
-                self.face_canvas.create_line(cx - mouth_w//2, mouth_y, cx + mouth_w//2, mouth_y, fill=self.face_color)
+                self.face_canvas.create_line(cx - mouth_w//2 + 4, mouth_y, cx + mouth_w//2 - 4, mouth_y, fill=self.face_color, width=1.5)
             else:
-                # Static expressions
+                # Stoic / Smug / Stern Roman Statue lips
                 if self.face_sentiment == "SMUG":
-                    # Smug smile (arc curve upward)
+                    # Confident imperial smile curve
                     self.face_canvas.create_arc(
                         cx - mouth_w//2, mouth_y - 12, cx + mouth_w//2, mouth_y + 3,
-                        start=190, extent=160, style=tk.ARC, outline=self.face_color, width=2
+                        start=190, extent=160, style=tk.ARC, outline=self.face_color, width=2.5
                     )
                 elif self.face_sentiment == "STERN":
-                    # Angry frown (arc curve downward)
+                    # Severe downturned imperial frown
                     self.face_canvas.create_arc(
                         cx - mouth_w//2, mouth_y + 1, cx + mouth_w//2, mouth_y + 16,
-                        start=10, extent=160, style=tk.ARC, outline=self.face_color, width=2
+                        start=10, extent=160, style=tk.ARC, outline=self.face_color, width=2.5
                     )
                 else:
-                    # Neutral straight line mouth
+                    # Stoic straight line mouth with Cupid's bow notch
                     self.face_canvas.create_line(cx - mouth_w//2, mouth_y, cx + mouth_w//2, mouth_y, fill=self.face_color, width=2)
+                    self.face_canvas.create_line(cx - 6, mouth_y - 2, cx, mouth_y, fill=self.face_color, width=1.5)
+                    self.face_canvas.create_line(cx, mouth_y, cx + 6, mouth_y - 2, fill=self.face_color, width=1.5)
                     
         except Exception as e:
             pass
