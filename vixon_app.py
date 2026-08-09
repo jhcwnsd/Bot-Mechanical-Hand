@@ -300,11 +300,44 @@ class VixonApp:
                 sessions.insert(0, "default")
             if active_session not in sessions:
                 sessions.append(active_session)
+                
+            self.current_session = active_session
             
-            self.session_menu.configure(values=sessions)
-            self.session_var.set(active_session)
+            # Clear old widgets in threads scroll frame
+            for w in self.threads_scroll_frame.winfo_children():
+                w.destroy()
+                
+            for s in sessions:
+                is_active = (s == self.current_session)
+                border_col = "#B51D29" if is_active else "#2E2E33"
+                border_w = 2 if is_active else 1
+                
+                card = ctk.CTkFrame(self.threads_scroll_frame, fg_color="#18181C", corner_radius=6, border_color=border_col, border_width=border_w)
+                card.pack(fill=tk.X, pady=4, ipady=4)
+                card.bind("<Button-1>", lambda e, session_name=s: self._switch_session(session_name))
+                
+                lbl = ctk.CTkLabel(card, text=s, font=("Consolas", 10, "bold" if is_active else "normal"), text_color="#E0E0E0" if is_active else "#A0A0A0", anchor="w", justify="left")
+                lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
+                lbl.bind("<Button-1>", lambda e, session_name=s: self._switch_session(session_name))
+                
+                btn_rename = ctk.CTkButton(
+                    card, text="✏️", font=("Consolas", 9), width=20, height=20,
+                    fg_color="transparent", hover_color="#2E2E33", text_color="#A0A0A0",
+                    command=lambda session_name=s: self._rename_session(session_name)
+                )
+                btn_rename.pack(side=tk.RIGHT, padx=2)
+                
+                if s != "default":
+                    btn_delete = ctk.CTkButton(
+                        card, text="❌", font=("Consolas", 9), width=20, height=20,
+                        fg_color="transparent", hover_color="#8F141E", text_color="#FF4D4D",
+                        command=lambda session_name=s: self._delete_session(session_name)
+                    )
+                    btn_delete.pack(side=tk.RIGHT, padx=2)
+                    
+            self.root.update_idletasks()
         except Exception as e:
-            self._log_event(f"Failed to load threads list: {e}")
+            self._log_event(f"Failed to refresh thread list: {e}")
 
     def _create_widgets(self):
         # Top title panel
@@ -326,26 +359,38 @@ class VixonApp:
         self.left_panel.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 10))
         self.left_panel.pack_propagate(False)
         
-        self.ledger_title = ctk.CTkLabel(
-            self.left_panel, text="SYNAPSE MEMORY LEDGER", 
-            font=("Consolas", 11, "bold"), text_color="#FF4D4D"
+        # Create Tabview in Left Panel
+        self.sidebar_tabs = ctk.CTkTabview(
+            self.left_panel, fg_color="transparent", text_color="#E0E0E0"
         )
-        self.ledger_title.pack(anchor=tk.W, padx=15, pady=(15, 5))
+        self.sidebar_tabs.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 0))
         
-        # Options Panel (Autonomy controls)
-        self.options_frame = ctk.CTkFrame(self.left_panel, fg_color="transparent")
-        self.options_frame.pack(fill=tk.X, padx=15, pady=(2, 5))
+        # Configure internal segmented button style elements
+        try:
+            self.sidebar_tabs._segmented_button.configure(
+                selected_color="#B51D29",
+                selected_hover_color="#8F141E",
+                unselected_color="#1E1E1E",
+                unselected_hover_color="#2E2E33",
+                font=("Consolas", 10, "bold")
+            )
+        except Exception:
+            pass
         
+        self.tab_memories = self.sidebar_tabs.add("LEDGER")
+        self.tab_chats = self.sidebar_tabs.add("CHATS")
+        
+        # TAB 1: MEMORIES LEDGER & STUDY TOOLS
         self.proactive_cb = ctk.CTkCheckBox(
-            self.options_frame, text="PROACTIVE CHAT", variable=self.proactive_var,
+            self.tab_memories, text="PROACTIVE CHAT", variable=self.proactive_var,
             font=("Consolas", 10, "bold"), text_color="#FF4D4D",
             fg_color="#B51D29", border_color="#2E2E33", hover_color="#8F141E"
         )
-        self.proactive_cb.pack(side=tk.LEFT)
+        self.proactive_cb.pack(anchor=tk.W, padx=10, pady=(10, 5))
         
         # Actions for ledger (Select all, Pin, Unpin & Delete)
-        self.ledger_actions_frame = ctk.CTkFrame(self.left_panel, fg_color="transparent")
-        self.ledger_actions_frame.pack(fill=tk.X, padx=10, pady=(2, 5))
+        self.ledger_actions_frame = ctk.CTkFrame(self.tab_memories, fg_color="transparent")
+        self.ledger_actions_frame.pack(fill=tk.X, padx=5, pady=(2, 5))
         
         self.select_all_btn = ctk.CTkButton(
             self.ledger_actions_frame, text="ALL", font=("Consolas", 9, "bold"),
@@ -381,20 +426,20 @@ class VixonApp:
         
         # Scrollable area for memories
         self.mem_scroll_frame = ctk.CTkScrollableFrame(
-            self.left_panel, fg_color="#121214", scrollbar_button_color="#2E2E33",
+            self.tab_memories, fg_color="#121214", scrollbar_button_color="#2E2E33",
             scrollbar_button_hover_color="#C82333"
         )
-        self.mem_scroll_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        self.mem_scroll_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=(5, 5))
         
         # Study tools panel
         self.study_title = ctk.CTkLabel(
-            self.left_panel, text="RESEARCH & STUDY", 
+            self.tab_memories, text="RESEARCH & STUDY", 
             font=("Consolas", 11, "bold"), text_color="#FF4D4D"
         )
-        self.study_title.pack(anchor=tk.W, padx=15, pady=(5, 5))
+        self.study_title.pack(anchor=tk.W, padx=5, pady=(5, 5))
         
-        self.study_tool_frame = ctk.CTkFrame(self.left_panel, fg_color="transparent")
-        self.study_tool_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        self.study_tool_frame = ctk.CTkFrame(self.tab_memories, fg_color="transparent")
+        self.study_tool_frame.pack(fill=tk.X, padx=5, pady=(0, 5))
         
         self.study_entry = ctk.CTkEntry(
             self.study_tool_frame, placeholder_text="Enter topic to study...",
@@ -419,6 +464,21 @@ class VixonApp:
         )
         self.study_btn.pack(side=tk.RIGHT)
         
+        # TAB 2: CHATS & CONVERSATIONS
+        self.sidebar_new_chat_btn = ctk.CTkButton(
+            self.tab_chats, text="+ NEW CONVERSATION", font=("Consolas", 11, "bold"),
+            fg_color="#1E1E1E", border_color="#28A745", border_width=1,
+            text_color="#28A745", hover_color="#1E5E2F", height=32,
+            command=self._create_new_session
+        )
+        self.sidebar_new_chat_btn.pack(fill=tk.X, padx=5, pady=(10, 10))
+        
+        self.threads_scroll_frame = ctk.CTkScrollableFrame(
+            self.tab_chats, fg_color="#121214", scrollbar_button_color="#2E2E33",
+            scrollbar_button_hover_color="#C82333"
+        )
+        self.threads_scroll_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
+        
         # System logging panel
         self.logs_title = ctk.CTkLabel(
             self.left_panel, text="SYSTEM EVENTS LOG", 
@@ -437,39 +497,13 @@ class VixonApp:
         self.right_panel = ctk.CTkFrame(self.container, fg_color="#18181A", corner_radius=8)
         self.right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         
-        # Session Header / Thread controls
-        self.session_frame = ctk.CTkFrame(self.right_panel, fg_color="transparent")
-        self.session_frame.pack(fill=tk.X, padx=15, pady=(15, 0))
-        
-        self.session_lbl = ctk.CTkLabel(
-            self.session_frame, text="CONVERSATION THREAD:",
-            font=("Consolas", 10, "bold"), text_color="#FF4D4D"
-        )
-        self.session_lbl.pack(side=tk.LEFT, padx=(0, 10))
-        
-        self.session_var = tk.StringVar(value="default")
-        self.session_menu = ctk.CTkOptionMenu(
-            self.session_frame, variable=self.session_var,
-            values=["default"], font=("Consolas", 10),
-            fg_color="#121214", button_color="#1E1E1E", button_hover_color="#C82333",
-            dropdown_fg_color="#121214", dropdown_text_color="#E0E0E0", dropdown_hover_color="#2E2E33",
-            width=150, height=28, command=self._switch_session
-        )
-        self.session_menu.pack(side=tk.LEFT)
-        
-        self.new_session_btn = ctk.CTkButton(
-            self.session_frame, text="+ NEW CHAT", font=("Consolas", 10, "bold"),
-            fg_color="#1E1E1E", border_color="#28A745", border_width=1,
-            text_color="#28A745", hover_color="#1E5E2F", width=90, height=28,
-            command=self._create_new_session
-        )
-        self.new_session_btn.pack(side=tk.RIGHT)
+
         
         self.chat_area = ctk.CTkTextbox(
             self.right_panel, font=("Consolas", 11), fg_color="#121214",
             text_color="#E0E0E0", wrap="word", activate_scrollbars=True
         )
-        self.chat_area.pack(fill=tk.BOTH, expand=True, padx=15, pady=(10, 10))
+        self.chat_area.pack(fill=tk.BOTH, expand=True, padx=15, pady=(15, 10))
         self.chat_area.tag_config("user", foreground="#66B2FF")
         self.chat_area.tag_config("ai", foreground="#E0E0E0")
         self.chat_area.tag_config("system", foreground="#FFCC00")
