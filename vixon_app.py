@@ -59,12 +59,18 @@ class VixonApp:
             "- You have a read-only web search tool to lookup information, research concepts, or learn things from the internet.\n"
             "- To search the web, you must output the query wrapped inside <web_search>your_search_query_here</web_search> tags.\n"
             "- When requesting a search, output ONLY your <thinking>...</thinking> block and the <web_search>...</web_search> tag. "
-            "Do not write conversational text. The search results will be fed back into your context automatically."
+            "Do not write conversational text. The search results will be fed back into your context automatically.\n\n"
+            "SELF-MODIFICATION & FILE EDITING:\n"
+            "- You can read and write files on the user's PC to configure yourself, fix bugs, or change your own source code (like 'vixon_app.py').\n"
+            "- To read a file, output the path wrapped in <read_file>filepath</read_file> tags. Do not write conversational text alongside it. The contents will be loaded into your context.\n"
+            "- To modify a file, output the path and the search-and-replace block wrapped in <edit_file>filepath\n<<<SEARCH\nexact_target_content_to_replace\n===\nnew_replacement_content\n>>>\n</edit_file> tags. Do not write conversational text alongside it. This will require the user's explicit manual approval in a popup window before executing."
         )
         
         self.gui_queue = queue.Queue()
         self.db_lock = threading.Lock()
         self.command_pending = False
+        self.pending_approval_type = None
+        self.current_file_edit = ""
         self.current_session = "default"
         self.current_messages = []
         self.original_user_prompt = ""
@@ -753,7 +759,13 @@ class VixonApp:
                     self._draw_memories_cards(content)
                 elif msg_type == "command_request":
                     self.current_command = content
+                    self.pending_approval_type = "command"
                     self.approval_lbl.configure(text=f"⚠️ Execute CMD: {content}")
+                    self.approval_frame.pack(fill=tk.X, padx=15, pady=(0, 15))
+                elif msg_type == "file_edit_request":
+                    filepath = content.split("\n")[0].strip()
+                    self.pending_approval_type = "file_edit"
+                    self.approval_lbl.configure(text=f"⚠️ Edit File: Modify '{os.path.basename(filepath)}'?")
                     self.approval_frame.pack(fill=tk.X, padx=15, pady=(0, 15))
         except queue.Empty:
             pass
@@ -930,6 +942,25 @@ class VixonApp:
             self._save_chat_message("assistant", response_text)
             self.current_messages.append({"role": "assistant", "content": response_text})
             threading.Thread(target=self._run_autonomous_search_tool, args=(search_query,), daemon=True).start()
+            return
+
+        # Check if model requested to read a file
+        read_match = re.search(r'<read_file>(.*?)</read_file>', response_text, re.DOTALL)
+        if read_match:
+            filepath = read_match.group(1).strip()
+            self._save_chat_message("assistant", response_text)
+            self.current_messages.append({"role": "assistant", "content": response_text})
+            threading.Thread(target=self._run_autonomous_read_tool, args=(filepath,), daemon=True).start()
+            return
+            
+        # Check if model requested to edit a file
+        edit_match = re.search(r'<edit_file>(.*?)</edit_file>', response_text, re.DOTALL)
+        if edit_match:
+            edit_block = edit_match.group(1).strip()
+            self._save_chat_message("assistant", response_text)
+            self.current_messages.append({"role": "assistant", "content": response_text})
+            self.current_file_edit = edit_block
+            self.gui_queue.put(("file_edit_request", edit_block))
             return
 
         match = re.search(r'<run_command>(.*?)</run_command>', response_text, re.DOTALL)
@@ -1115,7 +1146,84 @@ class VixonApp:
 
     def _handle_approval(self, approved):
         self.approval_frame.pack_forget()
-        threading.Thread(target=self._run_command_in_background, args=(approved,), daemon=True).start()
+        if self.pending_approval_type == "file_edit":
+            threading.Thread(target=self._run_file_edit_in_background, args=(approved,), daemon=True).start()
+        else:
+            threading.Thread(target=self._run_command_in_background, args=(approved,), daemon=True).start()
+
+    def _run_file_edit_in_background(self, approved):
+        edit_block = self.current_file_edit
+        if not approved:
+            self.gui_queue.put(("log", "File edit denied by user."))
+            output = "[File Edit Out]\nError: User denied permission to edit this file.\n[End Out]"
+        else:
+            try:
+                lines = edit_block.split("\n")
+                filepath = lines[0].strip()
+                rest = "\n".join(lines[1:])
+                
+                # Extract SEARCH and REPLACE blocks
+                search_parts = rest.split("<<<SEARCH\n", 1)
+                if len(search_parts) < 2:
+                    raise ValueError("Missing <<<SEARCH tag")
+                
+                replace_parts = search_parts[1].split("\n===\n", 1)
+                if len(replace_parts) < 2:
+                    raise ValueError("Missing === separator")
+                
+                end_parts = replace_parts[1].split("\n>>>", 1)
+                if len(end_parts) < 2:
+                    raise ValueError("Missing >>> closing tag")
+                
+                target_content = replace_parts[0]
+                replacement_content = end_parts[0]
+                
+                import os
+                if not os.path.isabs(filepath):
+                    filepath = os.path.abspath(filepath)
+                    
+                self.gui_queue.put(("log", f"Modifying file: {os.path.basename(filepath)}..."))
+                
+                with open(filepath, "r", encoding="utf-8") as f:
+                    content = f.read()
+                    
+                if target_content not in content:
+                    raise ValueError("Search target block not found exactly in the file")
+                    
+                new_content = content.replace(target_content, replacement_content, 1)
+                
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(new_content)
+                    
+                self.gui_queue.put(("log", f"Successfully updated {os.path.basename(filepath)}."))
+                output = f"[File Edit Out]\nSuccess: File '{os.path.basename(filepath)}' successfully modified.\n[End Out]"
+            except Exception as e:
+                self.gui_queue.put(("log", f"File edit failed: {e}"))
+                output = f"[File Edit Out]\nError modifying file: {e}\n[End Out]"
+                
+        self.current_messages.append({"role": "user", "content": output})
+        self._save_chat_message("user", output)
+        self._run_ollama_turn()
+
+    def _run_autonomous_read_tool(self, filepath):
+        self.gui_queue.put(("log", f"Vixon requested to read file: '{filepath}'..."))
+        import os
+        if not os.path.isabs(filepath):
+            filepath = os.path.abspath(filepath)
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                content = f.read()
+            if len(content) > 10000:
+                content = content[:10000] + "\n\n[TRUNCATED FOR LENGTH]"
+            read_context = f"\n\n[File Contents of '{os.path.basename(filepath)}']:\n{content}"
+            self.gui_queue.put(("log", "File read successfully. Context loaded."))
+        except Exception as e:
+            read_context = f"\n\n[File Contents of '{os.path.basename(filepath)}']:\nError reading file: {e}"
+            self.gui_queue.put(("log", f"File read failed: {e}"))
+            
+        self.current_messages.append({"role": "user", "content": read_context})
+        self._save_chat_message("user", read_context)
+        self._run_ollama_turn()
 
     def _run_command_in_background(self, approved):
         cmd = self.current_command
