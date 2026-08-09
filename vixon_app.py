@@ -409,14 +409,16 @@ class VixonApp:
 
     def _async_log_event(self, msg):
         t_str = datetime.now().strftime("%H:%M:%S")
+        safe_msg = "".join(c for c in str(msg) if ord(c) <= 0xffff)
         self.log_textbox.configure(state=tk.NORMAL)
-        self.log_textbox.insert(tk.END, f"[{t_str}] {msg}\n")
+        self.log_textbox.insert(tk.END, f"[{t_str}] {safe_msg}\n")
         self.log_textbox.see(tk.END)
         self.log_textbox.configure(state=tk.DISABLED)
 
     def _write_chat(self, tag, msg):
+        safe_msg = "".join(c for c in str(msg) if ord(c) <= 0xffff)
         self.chat_area.configure(state=tk.NORMAL)
-        self.chat_area.insert(tk.END, f"\n{msg}\n", tag)
+        self.chat_area.insert(tk.END, f"\n{safe_msg}\n", tag)
         self.chat_area.see(tk.END)
         self.chat_area.configure(state=tk.DISABLED)
 
@@ -472,7 +474,7 @@ class VixonApp:
                 details_frame = ctk.CTkFrame(card, fg_color="transparent")
                 details_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 5))
                 
-                display_text = f"🔒 {content}" if pinned else content
+                display_text = f"[SAVED] {content}" if pinned else content
                 lbl = ctk.CTkLabel(details_frame, text=display_text, font=("Consolas", 10), text_color="#E0E0E0", wraplength=190, anchor="w", justify="left")
                 lbl.pack(fill=tk.X, padx=5, pady=(4, 2))
                 
