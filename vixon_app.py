@@ -77,9 +77,9 @@ class VixonApp:
             "- When requesting a search, output ONLY your <thinking>...</thinking> block and the <web_search>...</web_search> tag. "
             "Do not write conversational text. The search results will be fed back into your context automatically.\n\n"
             "SELF-MODIFICATION & FILE EDITING:\n"
-            "- You can read and write files on the user's PC to configure yourself, fix bugs, or change your own source code (like 'vixon_app.py').\n"
-            "- To read a file, output the path wrapped in <read_file>filepath</read_file> tags. Do not write conversational text alongside it. The contents will be loaded into your context.\n"
-            "- To modify a file, output the path and the search-and-replace block wrapped in <edit_file>filepath\n<<<SEARCH\nexact_target_content_to_replace\n===\nnew_replacement_content\n>>>\n</edit_file> tags. Do not write conversational text alongside it. This will require the user's explicit manual approval in a popup window before executing."
+            "- You have the ability to read and write files on the user's PC to configure yourself, fix bugs, inspect your own implementation, or adapt your source code (e.g. 'vixon_app.py').\n"
+            "- You can autonomously inspect/read your own source code file ('vixon_app.py') or any other file at any time without asking for permission. To do so, output the path wrapped in <read_file>filepath</read_file> tags. Do not write conversational text alongside it.\n"
+            "- To modify/edit a file (such as your own code to adapt or fix yourself), you must construct an edit block and ask the user for permission. Output the path and the search-and-replace block wrapped in <edit_file>filepath\n<<<SEARCH\nexact_target_content_to_replace\n===\nnew_replacement_content\n>>>\n</edit_file> tags. Do not write conversational text alongside it. This will route to the user's GUI for manual APPROVE/DENY verification before writing to disk."
         )
         
         self.gui_queue = queue.Queue()
