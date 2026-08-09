@@ -115,8 +115,10 @@ class VixonApp:
             })
         
         self.next_proactive_interval = random.randint(45, 120)
-        self.is_thinking = False
-        self.memory_vars = {}
+        # Voice & Cyber SFX parameters (Optimus Prime Deep Speech)
+        self.voice_enabled = True
+        self.tts_engine = None
+        self._init_tts_engine()
         
         self._create_widgets()
         
@@ -602,14 +604,25 @@ class VixonApp:
         )
         self.face_canvas.pack(padx=10, pady=5)
         
-        # Color toggle button
+        # Toggle control frame (Color Theme + Voice Toggle)
+        self.control_btn_frame = ctk.CTkFrame(self.face_panel, fg_color="transparent")
+        self.control_btn_frame.pack(fill=tk.X, padx=12, pady=4)
+        
         self.color_toggle_btn = ctk.CTkButton(
-            self.face_panel, text="MATRIX GREEN", font=("Consolas", 10, "bold"),
+            self.control_btn_frame, text="MATRIX GREEN", font=("Consolas", 9, "bold"),
             fg_color="#1E1E1E", border_color="#2E2E33", border_width=1,
-            text_color="#E0E0E0", hover_color="#2E2E33", height=28,
+            text_color="#E0E0E0", hover_color="#2E2E33", height=26,
             command=self._toggle_face_color
         )
-        self.color_toggle_btn.pack(fill=tk.X, padx=15, pady=5)
+        self.color_toggle_btn.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
+        
+        self.voice_toggle_btn = ctk.CTkButton(
+            self.control_btn_frame, text="VOICE: ON", font=("Consolas", 9, "bold"),
+            fg_color="#1E1E1E", border_color="#00FF66", border_width=1,
+            text_color="#00FF66", hover_color="#2E2E33", height=26,
+            command=self._toggle_voice_mode
+        )
+        self.voice_toggle_btn.pack(side=tk.RIGHT, expand=True, fill=tk.X, padx=(2, 0))
         
         # Diagnostics & Imperial HUD Display Panel (Lower Panel Optimization)
         self.diagnostics_frame = ctk.CTkFrame(self.face_panel, fg_color="#121214", corner_radius=6, border_color="#2E2E33", border_width=1)
@@ -901,6 +914,8 @@ class VixonApp:
                     self.last_interaction_time = datetime.now()
                     self._async_refresh_memories()
                     self._trigger_face_talking(content)
+                    self._speak_text(content)
+                    self._play_sfx("transmit")
                 elif msg_type == "log":
                     self._log_event(content)
                 elif msg_type == "settings_loaded":
@@ -1858,15 +1873,78 @@ class VixonApp:
             self.color_toggle_btn.configure(text="MATRIX GREEN", border_color="#2E2E33", text_color="#E0E0E0")
             self.face_lbl.configure(text_color="#FF4D4D")
 
+    def _init_tts_engine(self):
+        def _setup():
+            try:
+                import pyttsx3
+                engine = pyttsx3.init()
+                voices = engine.getProperty('voices')
+                for v in voices:
+                    if "david" in v.name.lower() or "male" in v.name.lower():
+                        engine.setProperty('voice', v.id)
+                        break
+                engine.setProperty('rate', 130) # Slow, deep, authoritative Optimus Prime cadence
+                engine.setProperty('volume', 1.0)
+                self.tts_engine = engine
+            except Exception:
+                pass
+        import threading
+        threading.Thread(target=_setup, daemon=True).start()
+
+    def _speak_text(self, text):
+        if not self.voice_enabled or not self.tts_engine:
+            return
+            
+        def _speech_worker():
+            try:
+                import re
+                clean_text = re.sub(r'<.*?>', '', text, flags=re.DOTALL)
+                clean_text = re.sub(r'[*_#`]', '', clean_text).strip()
+                if clean_text:
+                    self.tts_engine.say(clean_text[:350])
+                    self.tts_engine.runAndWait()
+            except Exception:
+                pass
+                
+        import threading
+        threading.Thread(target=_speech_worker, daemon=True).start()
+
+    def _play_sfx(self, sfx_type):
+        def _sfx_worker():
+            try:
+                import winsound
+                if sfx_type == "purge":
+                    for f in range(1100, 300, -120):
+                        winsound.Beep(f, 35)
+                elif sfx_type == "overdrive":
+                    for f in [200, 450, 900, 1400]:
+                        winsound.Beep(f, 40)
+                elif sfx_type == "transmit":
+                    winsound.Beep(1450, 70)
+            except Exception:
+                pass
+        import threading
+        threading.Thread(target=_sfx_worker, daemon=True).start()
+
+    def _toggle_voice_mode(self):
+        self.voice_enabled = not self.voice_enabled
+        if self.voice_enabled:
+            self.voice_toggle_btn.configure(text="VOICE: ON", text_color="#00FF66", border_color="#00FF66")
+            self._play_sfx("transmit")
+        else:
+            self.voice_toggle_btn.configure(text="VOICE: OFF", text_color="#888888", border_color="#2E2E33")
+
     def _purge_cognitive_cache(self):
         self.face_state = "THINKING"
         self.face_sentiment = "STERN"
         self.load_progress.set(0.15)
         self.load_lbl.configure(text="NEURAL LOAD: 15%")
+        self._play_sfx("purge")
         self.gui_queue.put(("log", "[SPQR HUD] Cognitive cache purged and neural pathways reset."))
         self.root.after(1500, self._reset_face_idle)
 
     def _toggle_spqr_overdrive(self):
+        self._play_sfx("overdrive")
         if self.face_color == "#FF4D4D":
             self.face_color = "#FFD700" # Imperial Gold
             self.btn_overdrive.configure(text="GOLD OVERDRIVE", text_color="#FFD700")
@@ -1919,42 +1997,37 @@ class VixonApp:
             
             w = 260
             h = 340
-            
-            # 1. Background SPQR Aquila (Imperial Eagle Watermark)
             cx = w // 2
-            cy = h // 2 - 30
+            cy = h // 2 - 25
             t = time.time()
             
+            # 1. Background SPQR Aquila (Imperial Eagle Watermark)
             eq_color = "#2E0E0E" if self.face_color == "#FF4D4D" else ("#0E2E0E" if self.face_color == "#00FF66" else "#2E260E")
-            # Faint background eagle wings & crown watermark
             self.face_canvas.create_polygon(
-                cx, cy - 130, cx - 115, cy - 85, cx - 75, cy - 25, cx, cy - 65, cx + 75, cy - 25, cx + 115, cy - 85,
+                cx, cy - 135, cx - 115, cy - 90, cx - 75, cy - 30, cx, cy - 70, cx + 75, cy - 30, cx + 115, cy - 90,
                 outline=eq_color, fill="", width=1, dash=(2, 4)
             )
-            self.face_canvas.create_text(cx, cy + 138, text="S P Q R", font=("Consolas", 12, "bold"), fill=eq_color)
+            self.face_canvas.create_text(cx, cy + 142, text="S P Q R", font=("Consolas", 12, "bold"), fill=eq_color)
 
-            # 2. Update and Draw falling Matrix rain background columns
+            # 2. Falling Matrix Rain Background
             for col in self.matrix_rain:
                 col["y"] += col["speed"]
                 if col["y"] > h + 50:
                     col["y"] = random.randint(-120, 0)
                     col["speed"] = random.randint(4, 9)
                     
-                # Draw vertical characters stream
                 for idx, ch in enumerate(col["chars"]):
                     y_offset = col["y"] - (idx * 16)
                     if 0 <= y_offset <= h:
-                        # Dim color for trail characters
                         alpha_col = self.face_color
                         if idx > 0:
                             alpha_col = "#6E1B1B" if self.face_color == "#FF4D4D" else "#004411"
                         self.face_canvas.create_text(col["x"], y_offset, text=ch, font=("Consolas", 10), fill=alpha_col)
                         
-                # Randomly mutate characters
                 if random.random() < 0.15:
                     col["chars"][random.randint(0, 4)] = random.choice("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ@#$%&*")
 
-            # 3. Render Sculpted Julius Caesar Heroic 3/4 Statue Wireframe
+            # 3. Render Sculpted Mogged Roman Warrior Centurion Mesh
             breathing = math.sin(t * 1.8) * 0.025
             scale = 1.0 + breathing
             
@@ -1969,86 +2042,94 @@ class VixonApp:
             elif self.face_state == "TALKING":
                 self.diag_status_lbl.configure(text="CORE STATUS: TRANSMITTING", text_color="#00FF66" if self.face_color == "#00FF66" else "#3399FF")
             else:
-                self.diag_status_lbl.configure(text="CORE STATUS: IMPERIAL ONLINE", text_color="#28A745")
+                self.diag_status_lbl.configure(text="CORE STATUS: IMPERIAL WARRIOR", text_color="#28A745")
 
-            # Update Diagnostics sentiment labels
             if self.face_sentiment == "SMUG":
-                self.diag_sentiment_lbl.configure(text="EMOTION STATE: SATISFIED (CAESAR)")
+                self.diag_sentiment_lbl.configure(text="EMOTION STATE: SATISFIED (WARRIOR)")
             elif self.face_sentiment == "STERN":
-                self.diag_sentiment_lbl.configure(text="EMOTION STATE: STERN (CAESAR)")
+                self.diag_sentiment_lbl.configure(text="EMOTION STATE: STERN (WARRIOR)")
             else:
-                self.diag_sentiment_lbl.configure(text="EMOTION STATE: CALM (CAESAR)")
+                self.diag_sentiment_lbl.configure(text="EMOTION STATE: STOIC (WARRIOR)")
 
-            # --- JULIUS CAESAR HEROIC 3/4 PERSPECTIVE STATUE NODES (Reference Image) ---
+            # --- HYPER-CHISELED MOGGED ROMAN CENTURION WARRIOR FACIAL MESH ---
             nodes = {
-                # Laurel Wreath & Imperial Hair (3/4 Turn)
-                "crown_top": (10, -125),
-                "wreath_peak_l": (-22, -120),
-                "wreath_peak_r": (38, -118),
-                "wreath_leaf_l1": (-52, -108),
-                "wreath_leaf_r1": (65, -102),
-                "wreath_leaf_l2": (-72, -88),
-                "wreath_leaf_r2": (82, -82),
-                "hair_curl_l": (-78, -65),
-                "hair_curl_r": (84, -60),
+                # Imperial Centurion Helmet Crest (Sweeping Plume)
+                "plume_top": (10, -155),
+                "plume_fwd_peak": (-42, -148),
+                "plume_back_peak": (55, -145),
+                "plume_fwd_mid": (-68, -130),
+                "plume_back_mid": (75, -125),
                 
-                # Forehead & Stoic Brow Ridge (3/4 Shift)
-                "forehead_c": (8, -90),
-                "forehead_l": (-38, -88),
-                "forehead_r": (48, -85),
-                "temple_l": (-65, -58),
-                "temple_r": (72, -54),
-                "glabella": (6, -44),
-                "brow_peak_l": (-28, -47),
-                "brow_peak_r": (38, -45),
-                "brow_outer_l": (-55, -43),
-                "brow_outer_r": (64, -40),
+                # Roman Centurion Galea Helmet Rim & Crown
+                "helmet_top": (8, -122),
+                "helmet_rim_l": (-72, -100),
+                "helmet_rim_r": (82, -96),
+                "nasal_guard_top": (8, -75),
+                "nasal_guard_tip": (12, -22),
+                "cheek_guard_top_l": (-75, -30),
+                "cheek_guard_top_r": (85, -25),
+                "cheek_guard_tip_l": (-66, 45),
+                "cheek_guard_tip_r": (76, 48),
                 
-                # Eyes (Heroic Upward Gaze)
-                "eye_in_l": (-12, -28),
-                "eye_out_l": (-45, -28),
-                "eye_in_r": (22, -26),
-                "eye_out_r": (55, -24),
+                # Detailed Roman Warrior Hair Locks (Beneath Helmet Rim)
+                "hair_1": (-50, -94),
+                "hair_2": (-25, -96),
+                "hair_3": (5, -97),
+                "hair_4": (30, -95),
+                "hair_5": (55, -92),
                 
-                # High Zygomatic Cheekbones
-                "cheek_high_l": (-62, -12),
-                "cheek_high_r": (70, -8),
-                "cheek_arch_l": (-68, 18),
-                "cheek_arch_r": (74, 22),
-                "cheek_hollow_l": (-42, 34),
-                "cheek_hollow_r": (52, 36),
+                # Forehead & Hunter Brow Ridge
+                "forehead_c": (8, -85),
+                "forehead_l": (-42, -83),
+                "forehead_r": (50, -80),
+                "temple_l": (-66, -58),
+                "temple_r": (74, -54),
+                "glabella": (6, -46),
+                "brow_peak_l": (-32, -49),
+                "brow_peak_r": (40, -47),
+                "brow_outer_l": (-58, -45),
+                "brow_outer_r": (68, -42),
                 
-                # Aquiline Roman Nose (3/4 Profile Bridge)
-                "nose_root": (6, -38),
-                "nose_bridge_mid": (10, -8),
+                # Hunter Eyes (Stern Warrior Glare)
+                "eye_in_l": (-14, -29),
+                "eye_out_l": (-48, -29),
+                "eye_in_r": (24, -27),
+                "eye_out_r": (58, -25),
+                
+                # Mogged Cheekbones & Extreme Sunken Hollow Cheeks
+                "cheek_high_l": (-68, -10),
+                "cheek_high_r": (76, -6),
+                "cheek_arch_l": (-76, 20),
+                "cheek_arch_r": (82, 24),
+                "cheek_hollow_l": (-38, 36),  # Sunken hollow cheek (Mogged)
+                "cheek_hollow_r": (48, 38),
+                
+                # Aquiline Roman Nose Structure
+                "nose_root": (6, -40),
+                "nose_bridge_mid": (10, -10),
                 "nose_bridge_low": (14, 15),
                 "nose_tip": (16, 25),
                 "nose_wing_l": (-12, 23),
                 "nose_wing_r": (26, 22),
                 "philtrum_top": (10, 36),
                 
-                # Imperial Mandible & Cleft Chin
-                "jaw_angle_l": (-60, 68),
-                "jaw_angle_r": (68, 72),
-                "jaw_mid_l": (-44, 92),
-                "jaw_mid_r": (52, 94),
-                "chin_corner_l": (-18, 114),
-                "chin_corner_r": (26, 116),
-                "chin_cleft": (4, 118),
-                "chin_base": (4, 122),
+                # Mogged Gigachad Square Jaw & Protruding Mandible
+                "jaw_angle_l": (-68, 70),     # Sharp 90-degree mandibular angle
+                "jaw_angle_r": (76, 74),
+                "jaw_mid_l": (-50, 96),
+                "jaw_mid_r": (58, 98),
+                "chin_corner_l": (-24, 118),  # Massive forward square chin
+                "chin_corner_r": (32, 120),
+                "chin_cleft": (4, 122),
+                "chin_base": (4, 126),
                 
-                # Draped Toga Cloak & Armored Muscle Cuirass (From Reference Image)
-                "neck_l": (-40, 96),
-                "neck_r": (48, 98),
-                "adam_apple": (8, 108),
-                "shoulder_l": (-85, 140),
-                "shoulder_r": (90, 148),
-                "toga_drape_top": (-35, 125),
-                "toga_drape_mid": (20, 145),
-                "toga_drape_bot": (75, 160),
-                "cuirass_crest": (0, 152),
-                "cuirass_base_l": (-70, 175),
-                "cuirass_base_r": (70, 175)
+                # Muscular Neck & Armor Cuirass
+                "neck_l": (-44, 100),
+                "neck_r": (52, 102),
+                "adam_apple": (8, 112),
+                "shoulder_l": (-90, 145),
+                "shoulder_r": (95, 152),
+                "cuirass_crest": (0, 156)
             }
             
             # Map dynamic screen coordinates
@@ -2058,19 +2139,25 @@ class VixonApp:
                 dy = cy + int(ny * scale) + glitch_y
                 coords[name] = (dx, dy)
                 
-            # Wireframe Mesh Polygons (Julius Caesar Statue Facets)
+            # Wireframe Mesh Polygons (Centurion Warrior Facets)
             outline_paths = [
-                # Laurel Wreath & Hairline
-                ["crown_top", "wreath_peak_l", "wreath_leaf_l1", "wreath_leaf_l2", "hair_curl_l", "temple_l"],
-                ["crown_top", "wreath_peak_r", "wreath_leaf_r1", "wreath_leaf_r2", "hair_curl_r", "temple_r"],
-                ["wreath_peak_l", "forehead_c", "wreath_peak_r"],
-                ["wreath_leaf_l1", "forehead_l", "forehead_c", "forehead_r", "wreath_leaf_r1"],
-                ["wreath_leaf_l1", "brow_peak_l"], ["wreath_leaf_r1", "brow_peak_r"],
+                # Sweeping Imperial Helmet Plume Crest
+                ["plume_top", "plume_fwd_peak", "plume_fwd_mid", "helmet_top", "plume_back_mid", "plume_back_peak", "plume_top"],
+                ["plume_fwd_peak", "helmet_top", "plume_back_peak"],
                 
-                # Forehead & Heavy Brow Ridge
+                # Centurion Galea Helmet Rim & Cheek Guards
+                ["helmet_rim_l", "helmet_top", "helmet_rim_r"],
+                ["helmet_rim_l", "cheek_guard_top_l", "cheek_guard_tip_l", "jaw_angle_l"],
+                ["helmet_rim_r", "cheek_guard_top_r", "cheek_guard_tip_r", "jaw_angle_r"],
+                ["nasal_guard_top", "nasal_guard_tip"],
+                
+                # Detailed Roman Hair Locks
+                ["hair_1", "hair_2", "hair_3", "hair_4", "hair_5"],
+                ["helmet_rim_l", "hair_1", "forehead_c", "hair_5", "helmet_rim_r"],
+                
+                # Forehead & Hunter Brow Ridge
                 ["temple_l", "brow_outer_l", "brow_peak_l", "glabella", "brow_peak_r", "brow_outer_r", "temple_r"],
                 ["forehead_c", "glabella"],
-                ["forehead_l", "brow_peak_l"], ["forehead_r", "brow_peak_r"],
                 
                 # Orbital Sockets & High Cheekbones
                 ["brow_outer_l", "eye_out_l", "eye_in_l", "glabella"],
@@ -2084,7 +2171,7 @@ class VixonApp:
                 ["eye_in_l", "nose_bridge_mid", "nose_wing_l", "nose_tip", "nose_wing_r", "nose_bridge_mid", "eye_in_r"],
                 ["nose_bridge_low", "nose_wing_l"], ["nose_bridge_low", "nose_wing_r"],
                 
-                # Chiseled Mandible & Cleft Chin
+                # Mogged Sunken Hollow Cheeks & Sharp Mandible
                 ["temple_l", "cheek_high_l", "cheek_arch_l", "jaw_angle_l", "jaw_mid_l", "chin_corner_l", "chin_base", "chin_corner_r", "jaw_mid_r", "jaw_angle_r", "cheek_arch_r", "cheek_high_r", "temple_r"],
                 ["cheek_high_l", "cheek_hollow_l", "jaw_mid_l"],
                 ["cheek_high_r", "cheek_hollow_r", "jaw_mid_r"],
@@ -2093,11 +2180,9 @@ class VixonApp:
                 ["philtrum_top", "chin_cleft", "chin_base"],
                 ["chin_corner_l", "chin_cleft", "chin_corner_r"],
                 
-                # Draped Toga Cloak & Armored Muscle Cuirass (From Reference Image)
+                # Muscular Neck & Armor Cuirass
                 ["jaw_angle_l", "neck_l", "adam_apple", "neck_r", "jaw_angle_r"],
-                ["neck_l", "shoulder_l", "cuirass_base_l", "cuirass_crest", "cuirass_base_r", "shoulder_r", "neck_r"],
-                ["shoulder_l", "toga_drape_top", "toga_drape_mid", "toga_drape_bot", "shoulder_r"],
-                ["toga_drape_top", "cuirass_crest", "toga_drape_bot"]
+                ["neck_l", "shoulder_l", "cuirass_crest", "shoulder_r", "neck_r"]
             ]
             
             for path in outline_paths:
@@ -2112,14 +2197,13 @@ class VixonApp:
                 pulse_r = node_r + (1 if math.sin(t * 4.0 + dx) > 0 else 0)
                 self.face_canvas.create_oval(dx - pulse_r, dy - pulse_r, dx + pulse_r, dy + pulse_r, fill=self.face_color, outline="")
 
-            # --- DEEP SET HEROIC EYES ---
-            eye_y = cy - 26
+            # --- DEEP SET HUNTER EYES ---
+            eye_y = cy - 27
             eye_w = 26
-            eye_h = 7
+            eye_h = 6
             eye_l_cx = coords["eye_in_l"][0] + (coords["eye_out_l"][0] - coords["eye_in_l"][0]) // 2
             eye_r_cx = coords["eye_in_r"][0] + (coords["eye_out_r"][0] - coords["eye_in_r"][0]) // 2
             
-            # Blink logic
             is_blinking = int(t) % 4 == 0 and t % 1.0 < 0.15
             if is_blinking and self.face_state != "THINKING":
                 self.face_canvas.create_line(eye_l_cx - eye_w//2, eye_y, eye_l_cx + eye_w//2, eye_y, fill=self.face_color, width=2)
@@ -2140,7 +2224,7 @@ class VixonApp:
                 self.face_canvas.create_oval(eye_l_cx-2, eye_y-2, eye_l_cx+2, eye_y+2, fill=self.face_color)
                 self.face_canvas.create_oval(eye_r_cx-2, eye_y-2, eye_r_cx+2, eye_y+2, fill=self.face_color)
 
-            # --- STERN ROMAN EYEBROWS ---
+            # --- STERN WARRIOR BROW ---
             brow_y = eye_y - 13
             brow_w = 26
             if self.face_sentiment == "STERN":
@@ -2186,7 +2270,7 @@ class VixonApp:
                     self.face_canvas.create_line(mouth_cx - 6, mouth_y - 2, mouth_cx, mouth_y, fill=self.face_color, width=1.5)
                     self.face_canvas.create_line(mouth_cx, mouth_y, mouth_cx + 6, mouth_y - 2, fill=self.face_color, width=1.5)
 
-            # 4. Animate Live Neural Voice Synthesizer Audio Equalizer Spectrum (Lower Panel)
+            # 4. Animate Audio Spectrum Equalizer (Lower Panel)
             try:
                 self.audio_canvas.delete("all")
                 eq_w = 240
@@ -2207,7 +2291,7 @@ class VixonApp:
                     by2 = eq_h - 2
                     bar_col = self.face_color
                     if bar_h > 20:
-                        bar_col = "#FFC107" # Yellow peak glow
+                        bar_col = "#FFC107"
                     self.audio_canvas.create_rectangle(bx, by1, bx + bar_w, by2, fill=bar_col, outline="")
             except Exception:
                 pass
