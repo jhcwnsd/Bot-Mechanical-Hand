@@ -83,8 +83,6 @@ class VixonApp:
         self.is_thinking = False
         self.memory_vars = {}
         
-        self._init_db()
-        self._load_settings()
         self._create_widgets()
         
         # Start queue reader loop
@@ -93,13 +91,15 @@ class VixonApp:
         # Start proactive communication checking loop
         self.root.after(5000, self._check_proactive_trigger)
         
-        # Force Tkinter layout update and draw memories after startup rendering finishes
+        # Force Tkinter layout update
         self.root.update_idletasks()
-        self.root.after(200, self._async_refresh_memories)
         
-        # Start background startup data loading to prevent main thread blocking
+        # Start background startup data loading (DB init, settings, history, sessions)
         self._write_chat("system", f"Meeting {self.ai_name}. Connection to local {self.model_name} active.")
         threading.Thread(target=self._async_startup_loader, daemon=True).start()
+        
+        # Start memories draw after loader completes or after startup delay
+        self.root.after(500, self._async_refresh_memories)
         
     def _init_db(self):
         # Database table creations and schema checks
@@ -287,14 +287,27 @@ class VixonApp:
             self.gui_queue.put(("log", f"Failed to load sessions asynchronously: {e}"))
 
     def _async_startup_loader(self):
-        # 1. Preload chat history
+        # 1. Initialize Database
+        try:
+            self._init_db()
+        except Exception as e:
+            self.gui_queue.put(("log", f"Failed to initialize database: {e}"))
+            
+        # 2. Load settings
+        try:
+            self._load_settings()
+            self.gui_queue.put(("settings_loaded", (self.ai_name, self.ai_personality)))
+        except Exception as e:
+            self.gui_queue.put(("log", f"Failed to load settings: {e}"))
+
+        # 3. Preload chat history
         try:
             history = self._get_chat_history(limit=30)
             self.gui_queue.put(("history_loaded", history))
         except Exception as e:
             self.gui_queue.put(("log", f"Failed to load chat history: {e}"))
             
-        # 2. Preload sessions list
+        # 4. Preload sessions list
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -705,6 +718,11 @@ class VixonApp:
                     self._async_refresh_memories()
                 elif msg_type == "log":
                     self._log_event(content)
+                elif msg_type == "settings_loaded":
+                    name, personality = content
+                    self.ai_name = name
+                    self.ai_personality = personality
+                    self.title_lbl.configure(text=f"▲  {name.upper()} LEDGER & CONTROL SYSTEM  ▲")
                 elif msg_type == "learned":
                     self._write_chat("learned", f"✨ Vixon learned fact: {content}")
                     self._async_refresh_memories()
