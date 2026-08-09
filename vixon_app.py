@@ -72,6 +72,8 @@ class VixonApp:
         self.pending_approval_type = None
         self.current_file_edit = ""
         self.current_session = "default"
+        self.memories_cache = []
+        self.chat_history_cache = []
         self.current_messages = []
         self.original_user_prompt = ""
         self.deep_study_var = tk.BooleanVar(value=False)
@@ -192,21 +194,12 @@ class VixonApp:
         self._log_event(f"Settings updated. Name: {name}")
 
     def _get_all_memories(self) -> str:
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT content, strength FROM memories ORDER BY id DESC")
-                rows = cursor.fetchall()
-                if not rows:
-                    return ""
-                
-                memories_str = "You have learned the following facts about yourself and the user:\n"
-                for row in rows:
-                    memories_str += f"- {row[0]} (strength: {row[1]:.2f})\n"
-                return memories_str
-        except Exception as e:
-            self._log_event(f"Error loading memories: {e}")
+        if not self.memories_cache:
             return ""
+        memories_str = "You have learned the following facts about yourself and the user:\n"
+        for content, strength in self.memories_cache:
+            memories_str += f"- {content} (strength: {strength:.2f})\n"
+        return memories_str
 
     def _get_chat_history(self, limit: int = 12) -> list:
         try:
@@ -565,6 +558,7 @@ class VixonApp:
 
     def _draw_memories_cards(self, rows):
         try:
+            self.memories_cache = [(r[1], r[2]) for r in rows] if rows else []
             # Clear old widgets in memory panel
             for w in self.mem_scroll_frame.winfo_children():
                 w.destroy()
@@ -736,6 +730,7 @@ class VixonApp:
                     self._draw_memories_cards(content)
                 elif msg_type == "history_loaded":
                     self._delete_thinking_placeholder()
+                    self.chat_history_cache = list(content)
                     for msg in content:
                         role = msg["role"]
                         text_val = msg["content"]
@@ -831,8 +826,8 @@ class VixonApp:
     def _query_pipeline_thread(self, prompt):
         self.original_user_prompt = prompt
         
-        # Load local history and memories context
-        history = self._get_chat_history()
+        # Load local history and memories context from in-memory caches
+        history = self.chat_history_cache
         learned_context = self._get_all_memories()
         
         # Fast python-based keyword check to bypass slow LLM pre-search checks
@@ -921,6 +916,7 @@ class VixonApp:
             
         user_prompt_with_context = f"[User Context: User (ID: 1)]\n{prompt}"
         self.current_messages.append({"role": "user", "content": user_prompt_with_context})
+        self.chat_history_cache.append({"role": "user", "content": user_prompt_with_context})
         self._save_chat_message("user", user_prompt_with_context)
         
         self._run_ollama_turn()
@@ -980,6 +976,7 @@ class VixonApp:
         if search_match:
             search_query = search_match.group(1).strip()
             self._save_chat_message("assistant", response_text)
+            self.chat_history_cache.append({"role": "assistant", "content": response_text})
             self.current_messages.append({"role": "assistant", "content": response_text})
             threading.Thread(target=self._run_autonomous_search_tool, args=(search_query,), daemon=True).start()
             return
@@ -989,6 +986,7 @@ class VixonApp:
         if read_match:
             filepath = read_match.group(1).strip()
             self._save_chat_message("assistant", response_text)
+            self.chat_history_cache.append({"role": "assistant", "content": response_text})
             self.current_messages.append({"role": "assistant", "content": response_text})
             threading.Thread(target=self._run_autonomous_read_tool, args=(filepath,), daemon=True).start()
             return
@@ -998,6 +996,7 @@ class VixonApp:
         if edit_match:
             edit_block = edit_match.group(1).strip()
             self._save_chat_message("assistant", response_text)
+            self.chat_history_cache.append({"role": "assistant", "content": response_text})
             self.current_messages.append({"role": "assistant", "content": response_text})
             self.current_file_edit = edit_block
             self.gui_queue.put(("file_edit_request", edit_block))
@@ -1007,10 +1006,12 @@ class VixonApp:
         if match:
             cmd = match.group(1).strip()
             self._save_chat_message("assistant", response_text)
+            self.chat_history_cache.append({"role": "assistant", "content": response_text})
             self.current_messages.append({"role": "assistant", "content": response_text})
             self.gui_queue.put(("command_request", cmd))
         else:
             self._save_chat_message("assistant", clean_resp)
+            self.chat_history_cache.append({"role": "assistant", "content": clean_resp})
             self.gui_queue.put(("response", clean_resp))
             
             # Combine background checks using the full response text so Vixon can learn from thoughts
@@ -1034,6 +1035,7 @@ class VixonApp:
             
         # Append the results back to the conversation as a user prompt and re-run the Ollama turn
         self.current_messages.append({"role": "user", "content": search_context})
+        self.chat_history_cache.append({"role": "user", "content": search_context})
         self._save_chat_message("user", search_context)
         self._run_ollama_turn()
 
@@ -1242,6 +1244,7 @@ class VixonApp:
                 output = f"[File Edit Out]\nError modifying file: {e}\n[End Out]"
                 
         self.current_messages.append({"role": "user", "content": output})
+        self.chat_history_cache.append({"role": "user", "content": output})
         self._save_chat_message("user", output)
         self._run_ollama_turn()
 
@@ -1262,6 +1265,7 @@ class VixonApp:
             self.gui_queue.put(("log", f"File read failed: {e}"))
             
         self.current_messages.append({"role": "user", "content": read_context})
+        self.chat_history_cache.append({"role": "user", "content": read_context})
         self._save_chat_message("user", read_context)
         self._run_ollama_turn()
 
@@ -1292,6 +1296,7 @@ class VixonApp:
             output = "[Command Out]\nError: User denied permission to execute this command.\n[End Out]"
             
         self.current_messages.append({"role": "user", "content": output})
+        self.chat_history_cache.append({"role": "user", "content": output})
         self._save_chat_message("user", output)
         
         self._run_ollama_turn()
