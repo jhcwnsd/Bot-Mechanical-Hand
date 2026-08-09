@@ -23,6 +23,22 @@ class VixonApp:
         self.root.geometry("950x650")
         self.root.configure(bg="#0B0B0C")
         
+        # Set AppUserModelID so Windows renders the custom icon separately on the taskbar
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("shin.chitsujo.vixon.ledger")
+        except Exception:
+            pass
+            
+        # Load and set custom app icon
+        try:
+            import os
+            icon_path = "vixon_logo.ico"
+            if os.path.exists(icon_path):
+                self.root.iconbitmap(icon_path)
+        except Exception:
+            pass
+        
         self.db_path = "personal_brain.db"
         self.ollama_url = "http://localhost:11434/api/chat"
         self.model_name = "llama3.1"
