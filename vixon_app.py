@@ -97,9 +97,9 @@ class VixonApp:
         self.root.update_idletasks()
         self.root.after(200, self._async_refresh_memories)
         
-        # Load and display chat history at startup
-        self._preload_chat_history_gui()
-        self._update_session_menu("default")
+        # Start background startup data loading to prevent main thread blocking
+        self._write_chat("system", f"Meeting {self.ai_name}. Connection to local {self.model_name} active.")
+        threading.Thread(target=self._async_startup_loader, daemon=True).start()
         
     def _init_db(self):
         # Database table creations and schema checks
@@ -238,38 +238,14 @@ class VixonApp:
     def _preload_chat_history_gui(self):
         # Welcoming print
         self._write_chat("system", f"Meeting {self.ai_name}. Connection to local {self.model_name} active.")
-        
+        threading.Thread(target=self._async_preload_chat_history_thread, daemon=True).start()
+
+    def _async_preload_chat_history_thread(self):
         try:
             history = self._get_chat_history(limit=30)
-            for msg in history:
-                role = msg["role"]
-                content = msg["content"]
-                
-                # Strip user context format if present
-                if role == "user":
-                    display_content = content
-                    if display_content.startswith("[User Context:"):
-                        parts = display_content.split("]\n", 1)
-                        if len(parts) > 1:
-                            display_content = parts[1]
-                    self._write_chat("user", f"You: {display_content}")
-                    
-                elif role == "assistant":
-                    # Strip <thinking> tags from assistant content for clean display
-                    display_content = content
-                    if "<thinking>" in content:
-                        parts = content.split("<thinking>", 1)
-                        before = parts[0]
-                        after = parts[1]
-                        if "</thinking>" in after:
-                            sub = after.split("</thinking>", 1)
-                            display_content = (before + sub[1]).strip()
-                        else:
-                            display_content = before.strip()
-                    if display_content:
-                        self._write_chat("ai", f"{self.ai_name}: {display_content}")
+            self.gui_queue.put(("history_loaded", history))
         except Exception as e:
-            self._log_event(f"Failed to preload chat history: {e}")
+            self.gui_queue.put(("log", f"Failed to preload chat history: {e}"))
 
     def _switch_session(self, val):
         self.current_session = val
@@ -297,53 +273,36 @@ class VixonApp:
             self._log_event(f"Failed to create new chat thread: {e}")
 
     def _update_session_menu(self, active_session="default"):
+        self.current_session = active_session
+        threading.Thread(target=self._async_load_sessions_thread, args=(active_session,), daemon=True).start()
+
+    def _async_load_sessions_thread(self, active_session):
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT DISTINCT session_id FROM chat_history")
                 sessions = [r[0] for r in cursor.fetchall() if r[0] is not None]
-            if "default" not in sessions:
-                sessions.insert(0, "default")
-            if active_session not in sessions:
-                sessions.append(active_session)
-                
-            self.current_session = active_session
-            
-            # Clear old widgets in threads scroll frame
-            for w in self.threads_scroll_frame.winfo_children():
-                w.destroy()
-                
-            for s in sessions:
-                is_active = (s == self.current_session)
-                border_col = "#B51D29" if is_active else "#2E2E33"
-                border_w = 2 if is_active else 1
-                
-                card = ctk.CTkFrame(self.threads_scroll_frame, fg_color="#18181C", corner_radius=6, border_color=border_col, border_width=border_w)
-                card.pack(fill=tk.X, pady=4, ipady=4)
-                card.bind("<Button-1>", lambda e, session_name=s: self._switch_session(session_name))
-                
-                lbl = ctk.CTkLabel(card, text=s, font=("Consolas", 10, "bold" if is_active else "normal"), text_color="#E0E0E0" if is_active else "#A0A0A0", anchor="w", justify="left")
-                lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
-                lbl.bind("<Button-1>", lambda e, session_name=s: self._switch_session(session_name))
-                
-                btn_rename = ctk.CTkButton(
-                    card, text="✏️", font=("Consolas", 9), width=20, height=20,
-                    fg_color="transparent", hover_color="#2E2E33", text_color="#A0A0A0",
-                    command=lambda session_name=s: self._rename_session(session_name)
-                )
-                btn_rename.pack(side=tk.RIGHT, padx=2)
-                
-                if s != "default":
-                    btn_delete = ctk.CTkButton(
-                        card, text="❌", font=("Consolas", 9), width=20, height=20,
-                        fg_color="transparent", hover_color="#8F141E", text_color="#FF4D4D",
-                        command=lambda session_name=s: self._delete_session(session_name)
-                    )
-                    btn_delete.pack(side=tk.RIGHT, padx=2)
-                    
-            self.root.update_idletasks()
+            self.gui_queue.put(("sessions_loaded", (sessions, active_session)))
         except Exception as e:
-            self._log_event(f"Failed to refresh thread list: {e}")
+            self.gui_queue.put(("log", f"Failed to load sessions asynchronously: {e}"))
+
+    def _async_startup_loader(self):
+        # 1. Preload chat history
+        try:
+            history = self._get_chat_history(limit=30)
+            self.gui_queue.put(("history_loaded", history))
+        except Exception as e:
+            self.gui_queue.put(("log", f"Failed to load chat history: {e}"))
+            
+        # 2. Preload sessions list
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT DISTINCT session_id FROM chat_history")
+                sessions = [r[0] for r in cursor.fetchall() if r[0] is not None]
+            self.gui_queue.put(("sessions_loaded", (sessions, self.current_session)))
+        except Exception as e:
+            self.gui_queue.put(("log", f"Failed to load threads list: {e}"))
 
     def _create_widgets(self):
         # Top title panel
@@ -757,6 +716,69 @@ class VixonApp:
                     self._async_refresh_memories()
                 elif msg_type == "memories_data":
                     self._draw_memories_cards(content)
+                elif msg_type == "history_loaded":
+                    self._delete_thinking_placeholder()
+                    for msg in content:
+                        role = msg["role"]
+                        text_val = msg["content"]
+                        if role == "user":
+                            display_content = text_val
+                            if display_content.startswith("[User Context:"):
+                                parts = display_content.split("]\n", 1)
+                                if len(parts) > 1:
+                                    display_content = parts[1]
+                            self._write_chat("user", f"You: {display_content}")
+                        elif role == "assistant":
+                            display_content = text_val
+                            if "<thinking>" in text_val:
+                                parts = text_val.split("<thinking>", 1)
+                                before = parts[0]
+                                after = parts[1]
+                                if "</thinking>" in after:
+                                    sub = after.split("</thinking>", 1)
+                                    display_content = (before + sub[1]).strip()
+                                else:
+                                    display_content = before.strip()
+                            if display_content:
+                                self._write_chat("ai", f"{self.ai_name}: {display_content}")
+                elif msg_type == "sessions_loaded":
+                    sessions, active_session = content
+                    if "default" not in sessions:
+                        sessions.insert(0, "default")
+                    if active_session not in sessions:
+                        sessions.append(active_session)
+                        
+                    for w in self.threads_scroll_frame.winfo_children():
+                        w.destroy()
+                        
+                    for s in sessions:
+                        is_active = (s == active_session)
+                        border_col = "#B51D29" if is_active else "#2E2E33"
+                        border_w = 2 if is_active else 1
+                        
+                        card = ctk.CTkFrame(self.threads_scroll_frame, fg_color="#18181C", corner_radius=6, border_color=border_col, border_width=border_w)
+                        card.pack(fill=tk.X, pady=4, ipady=4)
+                        card.bind("<Button-1>", lambda e, session_name=s: self._switch_session(session_name))
+                        
+                        lbl = ctk.CTkLabel(card, text=s, font=("Consolas", 10, "bold" if is_active else "normal"), text_color="#E0E0E0" if is_active else "#A0A0A0", anchor="w", justify="left")
+                        lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
+                        lbl.bind("<Button-1>", lambda e, session_name=s: self._switch_session(session_name))
+                        
+                        btn_rename = ctk.CTkButton(
+                            card, text="✏️", font=("Consolas", 9), width=20, height=20,
+                            fg_color="transparent", hover_color="#2E2E33", text_color="#A0A0A0",
+                            command=lambda session_name=s: self._rename_session(session_name)
+                        )
+                        btn_rename.pack(side=tk.RIGHT, padx=2)
+                        
+                        if s != "default":
+                            btn_delete = ctk.CTkButton(
+                                card, text="❌", font=("Consolas", 9), width=20, height=20,
+                                fg_color="transparent", hover_color="#8F141E", text_color="#FF4D4D",
+                                command=lambda session_name=s: self._delete_session(session_name)
+                            )
+                            btn_delete.pack(side=tk.RIGHT, padx=2)
+                    self.root.update_idletasks()
                 elif msg_type == "command_request":
                     self.current_command = content
                     self.pending_approval_type = "command"
