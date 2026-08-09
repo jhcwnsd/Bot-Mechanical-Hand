@@ -19,7 +19,7 @@ ctk.set_default_color_theme("dark-blue")
 class VixonApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Vixon Ledger & Tactical HUD")
+        self.root.title("BLACK WALL TACTICAL HUD")
         self.root.geometry("950x650")
         self.root.configure(bg="#0B0B0C")
         
@@ -397,7 +397,7 @@ class VixonApp:
         self.title_frame.pack(fill=tk.X, side=tk.TOP)
         
         self.title_lbl = ctk.CTkLabel(
-            self.title_frame, text=f"▲  {self.ai_name.upper()} LEDGER & CONTROL SYSTEM  ▲",
+            self.title_frame, text=f"▲  {self.ai_name.upper()} - BLACK WALL SYSTEM  ▲",
             font=("Consolas", 14, "bold"), text_color="#FF4D4D"
         )
         self.title_lbl.pack(pady=12)
@@ -771,7 +771,7 @@ class VixonApp:
                     name, personality = content
                     self.ai_name = name
                     self.ai_personality = personality
-                    self.title_lbl.configure(text=f"▲  {name.upper()} LEDGER & CONTROL SYSTEM  ▲")
+                    self.title_lbl.configure(text=f"▲  {name.upper()} - BLACK WALL SYSTEM  ▲")
                 elif msg_type == "learned":
                     self._write_chat("learned", f"✨ Vixon learned fact: {content}")
                     self._async_refresh_memories()
