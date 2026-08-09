@@ -985,6 +985,11 @@ class VixonApp:
                 thinking_content = after_start.strip()
                 clean_resp = before_thought.strip()
                 
+        # Fallback if the model wrapped the entire response in thinking tags
+        if not clean_resp.strip() and thinking_content:
+            clean_resp = thinking_content
+            thinking_content = ""
+            
         if thinking_content:
             self.gui_queue.put(("thought", thinking_content))
             
