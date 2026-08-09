@@ -90,8 +90,8 @@ class VixonApp:
         self.root.update_idletasks()
         self.root.after(200, self._async_refresh_memories)
         
-        # Welcoming print
-        self._write_chat("system", f"Meeting {self.ai_name}. Connection to local {self.model_name} active.")
+        # Load and display chat history at startup
+        self._preload_chat_history_gui()
         
     def _init_db(self):
         # Database table creations and schema checks
@@ -217,6 +217,42 @@ class VixonApp:
                     conn.commit()
         except Exception as e:
             self._log_event(f"Error saving chat log: {e}")
+
+    def _preload_chat_history_gui(self):
+        # Welcoming print
+        self._write_chat("system", f"Meeting {self.ai_name}. Connection to local {self.model_name} active.")
+        
+        try:
+            history = self._get_chat_history(limit=30)
+            for msg in history:
+                role = msg["role"]
+                content = msg["content"]
+                
+                # Strip user context format if present
+                if role == "user":
+                    display_content = content
+                    if display_content.startswith("[User Context:"):
+                        parts = display_content.split("]\n", 1)
+                        if len(parts) > 1:
+                            display_content = parts[1]
+                    self._write_chat("user", f"You: {display_content}")
+                    
+                elif role == "assistant":
+                    # Strip <thinking> tags from assistant content for clean display
+                    display_content = content
+                    if "<thinking>" in content:
+                        parts = content.split("<thinking>", 1)
+                        before = parts[0]
+                        after = parts[1]
+                        if "</thinking>" in after:
+                            sub = after.split("</thinking>", 1)
+                            display_content = (before + sub[1]).strip()
+                        else:
+                            display_content = before.strip()
+                    if display_content:
+                        self._write_chat("ai", f"{self.ai_name}: {display_content}")
+        except Exception as e:
+            self._log_event(f"Failed to preload chat history: {e}")
 
     def _create_widgets(self):
         # Top title panel
