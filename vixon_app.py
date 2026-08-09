@@ -1166,8 +1166,19 @@ class VixonApp:
                 with sqlite3.connect(self.db_path, timeout=30.0) as conn:
                     cursor = conn.cursor()
                     
-                    # Decay active memories by 0.05 (pinned memories are exempt)
-                    cursor.execute("UPDATE memories SET strength = strength - 0.05 WHERE pinned = 0")
+                    # Decay active memories based on time elapsed since last_used (7-day decay window, pinned exempt)
+                    cursor.execute("SELECT id, last_used, strength FROM memories WHERE pinned = 0")
+                    mem_rows = cursor.fetchall()
+                    now = datetime.now()
+                    for m_id, last_used_str, cur_strength in mem_rows:
+                        try:
+                            last_used = datetime.fromisoformat(last_used_str)
+                        except Exception:
+                            last_used = now
+                        elapsed_hours = (now - last_used).total_seconds() / 3600.0
+                        decay_amount = elapsed_hours * (0.75 / 168.0)
+                        new_strength = max(0.0, 1.0 - decay_amount)
+                        cursor.execute("UPDATE memories SET strength = ? WHERE id = ?", (new_strength, m_id))
                     conn.commit()
                     
                     # Save new facts
