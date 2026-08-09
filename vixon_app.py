@@ -65,6 +65,7 @@ class VixonApp:
         self.gui_queue = queue.Queue()
         self.db_lock = threading.Lock()
         self.command_pending = False
+        self.current_session = "default"
         self.current_messages = []
         self.original_user_prompt = ""
         self.deep_study_var = tk.BooleanVar(value=False)
@@ -92,6 +93,7 @@ class VixonApp:
         
         # Load and display chat history at startup
         self._preload_chat_history_gui()
+        self._update_session_menu("default")
         
     def _init_db(self):
         # Database table creations and schema checks
@@ -146,9 +148,18 @@ class VixonApp:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     role TEXT,
                     content TEXT,
-                    timestamp TEXT
+                    timestamp TEXT,
+                    session_id TEXT DEFAULT 'default'
                 )
             """)
+            # Explicit column check and migration for chat_history
+            cursor.execute("PRAGMA table_info(chat_history)")
+            cols_history = [col[1] for col in cursor.fetchall()]
+            if "session_id" not in cols_history:
+                try:
+                    cursor.execute("ALTER TABLE chat_history ADD COLUMN session_id TEXT DEFAULT 'default'")
+                except Exception:
+                    pass
             conn.commit()
 
     def _load_settings(self):
@@ -196,8 +207,8 @@ class VixonApp:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT role, content FROM chat_history ORDER BY id DESC LIMIT ?",
-                    (limit,)
+                    "SELECT role, content FROM chat_history WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+                    (self.current_session, limit)
                 )
                 rows = cursor.fetchall()
                 return [{"role": row[0], "content": row[1]} for row in reversed(rows)]
@@ -211,8 +222,8 @@ class VixonApp:
                 with sqlite3.connect(self.db_path, timeout=30.0) as conn:
                     cursor = conn.cursor()
                     cursor.execute(
-                        "INSERT INTO chat_history (role, content, timestamp) VALUES (?, ?, ?)",
-                        (role, content, datetime.now().isoformat())
+                        "INSERT INTO chat_history (role, content, timestamp, session_id) VALUES (?, ?, ?, ?)",
+                        (role, content, datetime.now().isoformat(), self.current_session)
                     )
                     conn.commit()
         except Exception as e:
@@ -253,6 +264,47 @@ class VixonApp:
                         self._write_chat("ai", f"{self.ai_name}: {display_content}")
         except Exception as e:
             self._log_event(f"Failed to preload chat history: {e}")
+
+    def _switch_session(self, val):
+        self.current_session = val
+        self.chat_area.configure(state=tk.NORMAL)
+        self.chat_area.delete("1.0", tk.END)
+        self.chat_area.configure(state=tk.DISABLED)
+        self._preload_chat_history_gui()
+        self._log_event(f"Switched conversation thread to: '{val}'")
+
+    def _create_new_session(self):
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT DISTINCT session_id FROM chat_history")
+                sessions = [r[0] for r in cursor.fetchall()]
+            
+            num = 1
+            while f"Thread-{num}" in sessions:
+                num += 1
+            new_id = f"Thread-{num}"
+            
+            self._update_session_menu(new_id)
+            self._switch_session(new_id)
+        except Exception as e:
+            self._log_event(f"Failed to create new chat thread: {e}")
+
+    def _update_session_menu(self, active_session="default"):
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT DISTINCT session_id FROM chat_history")
+                sessions = [r[0] for r in cursor.fetchall() if r[0] is not None]
+            if "default" not in sessions:
+                sessions.insert(0, "default")
+            if active_session not in sessions:
+                sessions.append(active_session)
+            
+            self.session_menu.configure(values=sessions)
+            self.session_var.set(active_session)
+        except Exception as e:
+            self._log_event(f"Failed to load threads list: {e}")
 
     def _create_widgets(self):
         # Top title panel
@@ -385,11 +437,39 @@ class VixonApp:
         self.right_panel = ctk.CTkFrame(self.container, fg_color="#18181A", corner_radius=8)
         self.right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         
+        # Session Header / Thread controls
+        self.session_frame = ctk.CTkFrame(self.right_panel, fg_color="transparent")
+        self.session_frame.pack(fill=tk.X, padx=15, pady=(15, 0))
+        
+        self.session_lbl = ctk.CTkLabel(
+            self.session_frame, text="CONVERSATION THREAD:",
+            font=("Consolas", 10, "bold"), text_color="#FF4D4D"
+        )
+        self.session_lbl.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.session_var = tk.StringVar(value="default")
+        self.session_menu = ctk.CTkOptionMenu(
+            self.session_frame, variable=self.session_var,
+            values=["default"], font=("Consolas", 10),
+            fg_color="#121214", button_color="#1E1E1E", button_hover_color="#C82333",
+            dropdown_fg_color="#121214", dropdown_text_color="#E0E0E0", dropdown_hover_color="#2E2E33",
+            width=150, height=28, command=self._switch_session
+        )
+        self.session_menu.pack(side=tk.LEFT)
+        
+        self.new_session_btn = ctk.CTkButton(
+            self.session_frame, text="+ NEW CHAT", font=("Consolas", 10, "bold"),
+            fg_color="#1E1E1E", border_color="#28A745", border_width=1,
+            text_color="#28A745", hover_color="#1E5E2F", width=90, height=28,
+            command=self._create_new_session
+        )
+        self.new_session_btn.pack(side=tk.RIGHT)
+        
         self.chat_area = ctk.CTkTextbox(
             self.right_panel, font=("Consolas", 11), fg_color="#121214",
             text_color="#E0E0E0", wrap="word", activate_scrollbars=True
         )
-        self.chat_area.pack(fill=tk.BOTH, expand=True, padx=15, pady=(15, 10))
+        self.chat_area.pack(fill=tk.BOTH, expand=True, padx=15, pady=(10, 10))
         self.chat_area.tag_config("user", foreground="#66B2FF")
         self.chat_area.tag_config("ai", foreground="#E0E0E0")
         self.chat_area.tag_config("system", foreground="#FFCC00")
