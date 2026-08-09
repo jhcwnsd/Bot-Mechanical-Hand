@@ -73,6 +73,7 @@ class VixonApp:
         self.current_file_edit = ""
         self.current_session = "default"
         self.memories_cache = []
+        self.memory_ids_cache = []
         self.chat_history_cache = []
         self.current_messages = []
         self.original_user_prompt = ""
@@ -193,13 +194,37 @@ class VixonApp:
         self.ai_personality = personality
         self._log_event(f"Settings updated. Name: {name}")
 
-    def _get_all_memories(self) -> str:
+    def _get_all_memories(self, prompt: str = "") -> str:
         if not self.memories_cache:
             return ""
-        memories_str = "You have learned the following facts about yourself and the user:\n"
-        for content, strength in self.memories_cache:
-            memories_str += f"- {content} (strength: {strength:.2f})\n"
-        return memories_str
+            
+        if prompt:
+            prompt_words = set(re.findall(r'\b\w{3,}\b', prompt.lower()))
+            scored_memories = []
+            for content, strength, pinned in self.memories_cache:
+                content_words = set(re.findall(r'\b\w{3,}\b', content.lower()))
+                overlap = len(prompt_words.intersection(content_words))
+                
+                score = overlap * 2.0 + strength
+                if pinned:
+                    score += 5.0
+                scored_memories.append((score, content, strength))
+                
+            scored_memories.sort(key=lambda x: x[0], reverse=True)
+            top_memories = scored_memories[:5]
+            
+            if not top_memories:
+                return ""
+                
+            memories_str = "You have recalled the following relevant facts from your brain ledger:\n"
+            for score, content, strength in top_memories:
+                memories_str += f"- {content}\n"
+            return memories_str
+        else:
+            memories_str = "You have learned the following facts about yourself and the user:\n"
+            for content, strength, pinned in self.memories_cache:
+                memories_str += f"- {content} (strength: {strength:.2f})\n"
+            return memories_str
 
     def _get_chat_history(self, limit: int = 12) -> list:
         try:
@@ -435,12 +460,20 @@ class VixonApp:
         )
         self.delete_selected_btn.pack(side=tk.RIGHT, padx=(2, 0))
         
-        # Scrollable area for memories
-        self.mem_scroll_frame = ctk.CTkScrollableFrame(
-            self.tab_memories, fg_color="#121214", scrollbar_button_color="#2E2E33",
-            scrollbar_button_hover_color="#C82333"
+        # High-performance Tkinter listbox for zero-lag memories rendering
+        self.listbox_frame = ctk.CTkFrame(self.tab_memories, fg_color="transparent")
+        self.listbox_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=(5, 5))
+        
+        self.mem_scrollbar = tk.Scrollbar(self.listbox_frame, orient=tk.VERTICAL)
+        self.mem_listbox = tk.Listbox(
+            self.listbox_frame, selectmode=tk.MULTIPLE, font=("Consolas", 10),
+            bg="#121214", fg="#E0E0E0", selectbackground="#B51D29", selectforeground="#FFFFFF",
+            bd=0, highlightthickness=1, highlightbackground="#2E2E33", highlightcolor="#B51D29",
+            yscrollcommand=self.mem_scrollbar.set
         )
-        self.mem_scroll_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=(5, 5))
+        self.mem_scrollbar.config(command=self.mem_listbox.yview)
+        self.mem_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.mem_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         # Study tools panel
         self.study_title = ctk.CTkLabel(
@@ -598,86 +631,52 @@ class VixonApp:
 
     def _draw_memories_cards(self, rows):
         try:
-            self.memories_cache = [(r[1], r[2]) for r in rows] if rows else []
-            # Clear old widgets in memory panel
-            for w in self.mem_scroll_frame.winfo_children():
-                w.destroy()
-                
+            # Update active in-memory memories cache (stores content, strength, and pinned)
+            self.memories_cache = [(r[1], r[2], r[3]) for r in rows] if rows else []
+            
+            # Clear listbox
+            self.mem_listbox.delete(0, tk.END)
+            self.memory_ids_cache.clear()
+            
             if not rows:
-                placeholder = ctk.CTkLabel(self.mem_scroll_frame, text="No memories recorded yet.", font=("Consolas", 10), text_color="#555555")
-                placeholder.pack(pady=20)
+                self.mem_listbox.insert(tk.END, "No memories recorded yet.")
                 return
                 
-            self.memory_vars.clear()
-            
             for row in rows:
                 m_id = row[0]
                 content = row[1]
                 strength = row[2]
                 pinned = row[3]
                 
-                # Apply visual border styling differences if pinned
-                border_col = "#28A745" if pinned else "#2E2E33"
-                card = ctk.CTkFrame(self.mem_scroll_frame, fg_color="#18181C", corner_radius=6, border_color=border_col, border_width=1)
-                card.pack(fill=tk.X, pady=4, ipady=4)
-                
-                # Checkbox for memory selection
-                var = tk.BooleanVar(value=False)
-                self.memory_vars[m_id] = var
-                
-                cb = ctk.CTkCheckBox(
-                    card, text="", variable=var, width=16, height=16,
-                    fg_color="#B51D29", border_color="#2E2E33", hover_color="#8F141E",
-                    corner_radius=4
-                )
-                cb.pack(side=tk.LEFT, padx=(8, 0), anchor=tk.N, pady=10)
-                
-                # Sub-frame for layout formatting
-                details_frame = ctk.CTkFrame(card, fg_color="transparent")
-                details_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 5))
-                
-                display_text = f"[SAVED] {content}" if pinned else content
-                lbl = ctk.CTkLabel(details_frame, text=display_text, font=("Consolas", 10), text_color="#E0E0E0", wraplength=190, anchor="w", justify="left")
-                lbl.pack(fill=tk.X, padx=5, pady=(4, 2))
-                
-                # Visual strength bar representation
-                bar_frame = ctk.CTkFrame(details_frame, fg_color="transparent")
-                bar_frame.pack(fill=tk.X, padx=5, pady=(2, 4))
-                
-                # Progress bar displaying visual memory strength
-                prog_color = "#28A745" if pinned else "#FF4D4D"
-                pbar = ctk.CTkProgressBar(bar_frame, progress_color=prog_color, fg_color="#2A2A2E", height=6)
-                pbar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-                pbar.set(1.0 if pinned else max(0.0, min(1.0, strength)))
-                
-                status_text = "Saved" if pinned else f"{strength:.2f}"
-                pct_lbl = ctk.CTkLabel(bar_frame, text=status_text, font=("Consolas", 8), text_color="#888888")
-                pct_lbl.pack(side=tk.RIGHT)
+                # Format visual item text
+                prefix = "📌 " if pinned else f"[{strength:.1f}] "
+                self.mem_listbox.insert(tk.END, f"{prefix}{content}")
+                self.memory_ids_cache.append(m_id)
                 
             self.root.update_idletasks()
         except Exception as e:
             self._log_event(f"Error drawing memories panel: {e}")
 
     def _select_all_memories(self):
-        if not self.memory_vars:
+        if not self.memory_ids_cache:
             return
-        # If all are currently selected, deselect all. Otherwise, select all.
-        all_selected = all(var.get() for var in self.memory_vars.values())
-        target_val = not all_selected
-        for var in self.memory_vars.values():
-            var.set(target_val)
+        selected = self.mem_listbox.curselection()
+        if len(selected) == self.mem_listbox.size():
+            self.mem_listbox.selection_clear(0, tk.END)
+        else:
+            self.mem_listbox.selection_set(0, tk.END)
 
     def _delete_selected_memories(self):
-        selected_ids = [m_id for m_id, var in self.memory_vars.items() if var.get()]
-        if not selected_ids:
+        selected_indices = self.mem_listbox.curselection()
+        if not selected_indices:
             self._log_event("No memories selected for deletion.")
             return
-            
+        selected_ids = [self.memory_ids_cache[i] for i in selected_indices if i < len(self.memory_ids_cache)]
         try:
+            placeholders = ",".join("?" for _ in selected_ids)
             with self.db_lock:
                 with sqlite3.connect(self.db_path, timeout=30.0) as conn:
                     cursor = conn.cursor()
-                    placeholders = ",".join("?" for _ in selected_ids)
                     cursor.execute(f"DELETE FROM memories WHERE id IN ({placeholders})", selected_ids)
                     conn.commit()
             self._log_event(f"Deleted {len(selected_ids)} memories from database.")
@@ -686,16 +685,16 @@ class VixonApp:
             self._log_event(f"Failed to delete selected memories: {e}")
 
     def _pin_selected_memories(self):
-        selected_ids = [m_id for m_id, var in self.memory_vars.items() if var.get()]
-        if not selected_ids:
+        selected_indices = self.mem_listbox.curselection()
+        if not selected_indices:
             self._log_event("No memories selected to pin/save.")
             return
-            
+        selected_ids = [self.memory_ids_cache[i] for i in selected_indices if i < len(self.memory_ids_cache)]
         try:
+            placeholders = ",".join("?" for _ in selected_ids)
             with self.db_lock:
                 with sqlite3.connect(self.db_path, timeout=30.0) as conn:
                     cursor = conn.cursor()
-                    placeholders = ",".join("?" for _ in selected_ids)
                     cursor.execute(f"UPDATE memories SET pinned = 1, strength = 1.0 WHERE id IN ({placeholders})", selected_ids)
                     conn.commit()
             self._log_event(f"Pinned/Saved {len(selected_ids)} memories. They are now safe from decay.")
@@ -704,16 +703,16 @@ class VixonApp:
             self._log_event(f"Failed to pin selected memories: {e}")
 
     def _unpin_selected_memories(self):
-        selected_ids = [m_id for m_id, var in self.memory_vars.items() if var.get()]
-        if not selected_ids:
+        selected_indices = self.mem_listbox.curselection()
+        if not selected_indices:
             self._log_event("No memories selected to unpin.")
             return
-            
+        selected_ids = [self.memory_ids_cache[i] for i in selected_indices if i < len(self.memory_ids_cache)]
         try:
+            placeholders = ",".join("?" for _ in selected_ids)
             with self.db_lock:
                 with sqlite3.connect(self.db_path, timeout=30.0) as conn:
                     cursor = conn.cursor()
-                    placeholders = ",".join("?" for _ in selected_ids)
                     cursor.execute(f"UPDATE memories SET pinned = 0 WHERE id IN ({placeholders})", selected_ids)
                     conn.commit()
             self._log_event(f"Unpinned {len(selected_ids)} memories. They will now decay normally.")
@@ -846,7 +845,7 @@ class VixonApp:
         
         # Load local history and memories context from in-memory caches
         history = self.chat_history_cache
-        learned_context = self._get_all_memories()
+        learned_context = self._get_all_memories(prompt)
         
         # Fast python-based keyword check to bypass slow LLM pre-search checks
         needs_search = False
@@ -917,7 +916,7 @@ class VixonApp:
                                 conn.commit()
                         self.gui_queue.put(("log", f"Preloaded {len(pre_facts)} facts to memory ledger."))
                         # Reload the memories context so it includes the newly learned facts!
-                        learned_context = self._get_all_memories()
+                        learned_context = self._get_all_memories(prompt)
             except Exception as e:
                 self.gui_queue.put(("log", f"Search/pre-extraction failed: {e}"))
                 
