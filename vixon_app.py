@@ -692,8 +692,55 @@ class VixonApp:
                 if results:
                     search_context = "\n\n[CURRENT WEB SEARCH RESULTS]\n" + "\n".join([f"- {r}" for r in results])
                     self.gui_queue.put(("log", "Web search results retrieved."))
+                    
+                    # RUN IMMEDIATE PRE-EXTRACTION TO LEARN FACTS BEFORE VIXON REPLIES
+                    self.gui_queue.put(("log", "Pre-extracting research facts to memory..."))
+                    formatted_results = "\n".join([f"- {r}" for r in results])
+                    study_prompt = (
+                        f"You are Vixon. Extract the 3 most important facts, conceptual notes, or vocabulary words (e.g. curse words) "
+                        f"from this research about '{search_query}'. Write them as concise, third-person sentences (one per line, e.g. 'Italian vocabulary: ...' or 'Research notes: ...').\n"
+                        "Return ONLY the bullet points, one per line. Do not write any greetings or explanations.\n\n"
+                        f"Search Results:\n{formatted_results}"
+                    )
+                    
+                    payload_pre = {
+                        "model": self.model_name,
+                        "messages": [{"role": "user", "content": study_prompt}],
+                        "stream": False,
+                        "options": {
+                            "temperature": 0.3,
+                            "num_predict": 150
+                        }
+                    }
+                    
+                    headers = {"Content-Type": "application/json"}
+                    req_pre = urllib.request.Request(self.ollama_url, data=json.dumps(payload_pre).encode('utf-8'), headers=headers)
+                    with urllib.request.urlopen(req_pre) as resp_pre:
+                        pre_result = json.loads(resp_pre.read().decode('utf-8'))["message"]["content"].strip()
+                        
+                    # Save the newly extracted facts to SQLite immediately
+                    pre_facts = []
+                    for line in pre_result.split("\n"):
+                        line = line.strip().lstrip("-*• 1234567890. ").strip()
+                        if line and "NONE" not in line.upper() and len(line) > 5:
+                            pre_facts.append(line)
+                            
+                    if pre_facts:
+                        with self.db_lock:
+                            with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                                cursor = conn.cursor()
+                                for fact in pre_facts:
+                                    cursor.execute(
+                                        "INSERT INTO memories (content, timestamp, strength, last_used) VALUES (?, ?, 1.0, ?)",
+                                        (fact, datetime.now().isoformat(), datetime.now().isoformat())
+                                    )
+                                    self.gui_queue.put(("learned", fact))
+                                conn.commit()
+                        self.gui_queue.put(("log", f"Preloaded {len(pre_facts)} facts to memory ledger."))
+                        # Reload the memories context so it includes the newly learned facts!
+                        learned_context = self._get_all_memories()
             except Exception as e:
-                self.gui_queue.put(("log", f"Search extraction failed: {e}"))
+                self.gui_queue.put(("log", f"Search/pre-extraction failed: {e}"))
                 
         # Build prompt payload
         system_instruction = self.system_instruction.format(ai_name=self.ai_name, ai_personality=self.ai_personality)
