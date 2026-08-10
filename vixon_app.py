@@ -1614,7 +1614,12 @@ class VixonApp:
         self._run_ollama_turn()
 
     def _run_command_in_background(self, approved):
-        cmd = self.current_command
+        cmd = self.current_command.strip('`').strip()
+        # Clean up common Windows app command syntax errors
+        if 'microsoft-edge' in cmd.lower() or 'msedge' in cmd.lower():
+            cmd = 'start msedge'
+        elif cmd.lower() in ['open cmd', 'open command prompt', 'cmd.exe', 'start cmd.exe']:
+            cmd = 'start cmd'
         if approved:
             self.gui_queue.put(("log", f"Executing CMD: {cmd}"))
             try:
@@ -1637,13 +1642,24 @@ class VixonApp:
                 output = f"[Command Out]\nError executing command: {e}\n[End Out]"
         else:
             self.gui_queue.put(("log", "Command denied by user."))
-            output = "[Command Out]\nError: User denied permission to execute this command.\n[End Out]"
+            output = "[Command Out]\nError: User explicitly denied permission to execute this command and requested to stop.\n[End Out]"
+            self.current_messages.append({"role": "user", "content": output})
+            self.chat_history_cache.append({"role": "user", "content": output})
+            self._save_chat_message("user", output)
+            # STOP LOOP: Do not run another Ollama turn when command is denied!
+            self.is_thinking = False
+            self.face_state = 'NEUTRAL'
+            return
             
         self.current_messages.append({"role": "user", "content": output})
         self.chat_history_cache.append({"role": "user", "content": output})
         self._save_chat_message("user", output)
         
-        self._run_ollama_turn()
+        if not self.stop_requested:
+            self._run_ollama_turn()
+        else:
+            self.is_thinking = False
+            self.face_state = 'NEUTRAL'
 
     def _trigger_self_study(self):
         topic_text = self.study_entry.get().strip()
