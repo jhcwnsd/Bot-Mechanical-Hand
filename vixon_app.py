@@ -641,21 +641,13 @@ class VixonApp:
         self.control_btn_frame = ctk.CTkFrame(self.face_panel, fg_color="transparent")
         self.control_btn_frame.pack(fill=tk.X, padx=10, pady=4)
         
-        self.color_toggle_btn = ctk.CTkButton(
-            self.control_btn_frame, text="MATRIX GREEN", font=("Consolas", 9, "bold"),
-            fg_color="#1E1E1E", border_color="#2E2E33", border_width=1,
-            text_color="#E0E0E0", hover_color="#2E2E33", height=24,
-            command=self._toggle_face_color
-        )
-        self.color_toggle_btn.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
-        
         self.voice_toggle_btn = ctk.CTkButton(
             self.control_btn_frame, text="VOICE: ON", font=("Consolas", 9, "bold"),
-            fg_color="#1E1E1E", border_color="#00FF66", border_width=1,
-            text_color="#00FF66", hover_color="#2E2E33", height=24,
+            fg_color="#1E1E1E", border_color="#66B2FF", border_width=1,
+            text_color="#66B2FF", hover_color="#1A3A5C", height=24,
             command=self._toggle_voice_mode
         )
-        self.voice_toggle_btn.pack(side=tk.RIGHT, expand=True, fill=tk.X, padx=(2, 0))
+        self.voice_toggle_btn.pack(fill=tk.X)
         
         # Diagnostics & Imperial HUD Display Panel (Lower Panel Optimization)
         self.diagnostics_frame = ctk.CTkFrame(self.face_panel, fg_color="#121214", corner_radius=6, border_color="#2E2E33", border_width=1)
@@ -735,7 +727,7 @@ class VixonApp:
         
         self.btn_overdrive = ctk.CTkButton(
             self.actions_frame, text="SPQR OVERDRIVE", font=("Consolas", 8, "bold"),
-            fg_color="#1E1E1E", hover_color="#28A745", text_color="#00FF66",
+            fg_color="#1E1E1E", hover_color="#1A3A5C", text_color="#66B2FF",
             height=22, corner_radius=4, command=self._toggle_spqr_overdrive
         )
         self.btn_overdrive.pack(side=tk.RIGHT, expand=True, fill=tk.X, padx=1)
