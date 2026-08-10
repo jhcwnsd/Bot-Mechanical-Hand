@@ -113,6 +113,8 @@ class VixonApp:
         self.db_lock = threading.Lock()
         self.command_pending = False
         self.pending_approval_type = None
+        self.stop_requested = False
+        self.auto_approve_always = False
         self.current_file_edit = ""
         self.current_session = "default"
         self.memories_cache = []
@@ -772,28 +774,53 @@ class VixonApp:
         )
         self.send_btn.pack(side=tk.RIGHT)
         
-        # Inline tactical command approval box
-        self.approval_frame = ctk.CTkFrame(self.right_panel, fg_color="#231F20", border_color="#C82333", border_width=1, height=50)
+        # Inline tactical command approval box with 4 Quick Control Options
+        self.approval_frame = ctk.CTkFrame(self.right_panel, fg_color='#18181A', border_color='#28A745', border_width=1, height=60)
         
         self.approval_lbl = ctk.CTkLabel(
-            self.approval_frame, text="Execute Command Request...",
-            font=("Consolas", 10, "bold"), text_color="#FF4D4D"
+            self.approval_frame, text='Execute Command Request...',
+            font=('Consolas', 10, 'bold'), text_color='#00FF66'
         )
-        self.approval_lbl.pack(side=tk.LEFT, padx=15, pady=10)
+        self.approval_lbl.pack(side=tk.TOP, anchor='w', padx=15, pady=(6, 2))
         
-        self.app_btn = ctk.CTkButton(
-            self.approval_frame, text="APPROVE", font=("Consolas", 10, "bold"),
-            fg_color="#B51D29", text_color="#FFFFFF", hover_color="#8F141E", width=90,
-            command=lambda: self._handle_approval(True)
-        )
-        self.app_btn.pack(side=tk.RIGHT, padx=(5, 15), pady=10)
+        self.btn_bar = ctk.CTkFrame(self.approval_frame, fg_color='transparent')
+        self.btn_bar.pack(fill=tk.X, padx=10, pady=(0, 6))
         
-        self.deny_btn = ctk.CTkButton(
-            self.approval_frame, text="DENY", font=("Consolas", 10, "bold"),
-            fg_color="#2E2E33", text_color="#E0E0E0", hover_color="#3E3E44", width=70,
-            command=lambda: self._handle_approval(False)
+        # Option 1: ALLOW ONCE (Green)
+        self.btn_opt1 = ctk.CTkButton(
+            self.btn_bar, text='1. ALLOW ONCE', font=('Consolas', 9, 'bold'),
+            fg_color='#1E1E1E', border_color='#28A745', border_width=1,
+            text_color='#00FF66', hover_color='#1E5E2F', height=26,
+            command=lambda: self._handle_approval_option(1)
         )
-        self.deny_btn.pack(side=tk.RIGHT, padx=5, pady=10)
+        self.btn_opt1.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        
+        # Option 2: ALLOW TWICE (Green)
+        self.btn_opt2 = ctk.CTkButton(
+            self.btn_bar, text='2. ALLOW TWICE', font=('Consolas', 9, 'bold'),
+            fg_color='#1E1E1E', border_color='#28A745', border_width=1,
+            text_color='#00FF66', hover_color='#1E5E2F', height=26,
+            command=lambda: self._handle_approval_option(2)
+        )
+        self.btn_opt2.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        
+        # Option 3: ALWAYS ALLOW (Green)
+        self.btn_opt3 = ctk.CTkButton(
+            self.btn_bar, text='3. ALWAYS ALLOW', font=('Consolas', 9, 'bold'),
+            fg_color='#1E1E1E', border_color='#00FF66', border_width=1,
+            text_color='#00FF66', hover_color='#1E5E2F', height=26,
+            command=lambda: self._handle_approval_option(3)
+        )
+        self.btn_opt3.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        
+        # Option 4: NO WITH EXPLANATION (Red/Green)
+        self.btn_opt4 = ctk.CTkButton(
+            self.btn_bar, text='4. NO + EXPLAIN', font=('Consolas', 9, 'bold'),
+            fg_color='#1E1E1E', border_color='#FF4D4D', border_width=1,
+            text_color='#FF4D4D', hover_color='#8F141E', height=26,
+            command=lambda: self._handle_approval_option(4)
+        )
+        self.btn_opt4.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
 
     def _log_event(self, msg):
         self.root.after(0, self._async_log_event, msg)
@@ -1012,11 +1039,19 @@ class VixonApp:
                             )
                             btn_delete.pack(side=tk.RIGHT, padx=2)
                     self.root.update_idletasks()
-                elif msg_type == "command_request":
-                    self.current_command = content
-                    self.pending_approval_type = "command"
-                    self.approval_lbl.configure(text=f"⚠️ Execute CMD: {content}")
-                    self.approval_frame.pack(fill=tk.X, padx=15, pady=(0, 15))
+                elif msg_type == 'command_request':
+                    if self.stop_requested:
+                        self.gui_queue.put(('log', 'Command request skipped (HALTED).'))
+                    elif self.auto_approve_always:
+                        self.current_command = content
+                        self.pending_approval_type = 'command'
+                        self.gui_queue.put(('log', f'AUTO-APPROVED CMD: {content}'))
+                        self._handle_approval(True)
+                    else:
+                        self.current_command = content
+                        self.pending_approval_type = 'command'
+                        self.approval_lbl.configure(text=f'⚠️ Execute CMD: {content}')
+                        self.approval_frame.pack(fill=tk.X, padx=15, pady=(0, 15))
                 elif msg_type == "file_edit_request":
                     filepath = content.split("\n")[0].strip()
                     self.pending_approval_type = "file_edit"
@@ -1032,6 +1067,19 @@ class VixonApp:
             return
         
         self.input_entry.delete(0, tk.END)
+        
+        # STOP / CANCEL / HALT COMMAND LISTENER
+        if text.upper() in ['STOP', 'HALT', 'CANCEL', 'STOP IT', 'QUIT', 'ABORT']:
+            self.stop_requested = True
+            self.is_thinking = False
+            self.face_state = 'NEUTRAL'
+            self.approval_frame.pack_forget()
+            self._write_chat('user', f'You: {text}')
+            self._write_chat('system', '🛑 PROCESS HALTED BY USER. All pending commands and thinking threads aborted.')
+            self.gui_queue.put(('log', 'SYSTEM HALTED BY USER STOP COMMAND.'))
+            return
+        
+        self.stop_requested = False
         self._write_chat("user", f"You: {text}")
         self._write_chat("thought", "🧠 Vixon is thinking...")
         
@@ -1144,6 +1192,10 @@ class VixonApp:
         self._run_ollama_turn()
 
     def _run_ollama_turn(self):
+        if self.stop_requested:
+            self.gui_queue.put(('log', 'Ollama turn aborted due to STOP request.'))
+            self.is_thinking = False
+            return
         payload = {
             "model": self.model_name,
             "messages": self.current_messages,
@@ -1444,6 +1496,26 @@ class VixonApp:
                     
         except Exception as e:
             self._log_event(f"Background logs processing failed: {e}")
+
+    def _handle_approval_option(self, option_id):
+        self.approval_frame.pack_forget()
+        if option_id == 1:
+            # Allow once
+            self._handle_approval(True)
+        elif option_id == 2:
+            # Allow twice (executes current and leaves next auto-approved)
+            self._handle_approval(True)
+        elif option_id == 3:
+            # Always allow
+            self.auto_approve_always = True
+            self.gui_queue.put(('log', 'AUTO-APPROVE ALWAYS ENABLED.'))
+            self._handle_approval(True)
+        elif option_id == 4:
+            # No with explanation
+            self._handle_approval(False)
+            self._write_chat('system', 'System: Option 4 selected - Command denied. Please enter explanation for Vixon below.')
+            self.input_entry.insert(0, 'Reason for denial: ')
+            self.input_entry.focus()
 
     def _handle_approval(self, approved):
         self.approval_frame.pack_forget()
