@@ -1309,9 +1309,9 @@ class VixonApp:
             self.gui_queue.put(("file_edit_request", edit_block))
             return
 
-        match = re.search(r'<run_command>(.*?)</run_command>', response_text, re.DOTALL)
-        if match:
-            cmd = match.group(1).strip()
+        match = re.search(r'<run_command>(.*?)(?:</run_command>|$)', response_text, re.DOTALL)
+        if match and match.group(1).strip():
+            cmd = match.group(1).strip().split('\n')[0].strip('`').strip()
             self._save_chat_message("assistant", response_text)
             self.chat_history_cache.append({"role": "assistant", "content": response_text})
             self.current_messages.append({"role": "assistant", "content": response_text})
