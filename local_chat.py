@@ -33,8 +33,8 @@ class PersonalAI:
             "- When requesting a command, output ONLY your <thinking>...</thinking> block and the <run_command>...</run_command> tag. "
             "Do not write conversational text alongside command requests. Wait for the terminal execution results first.\n\n"
             "STYLE RULES:\n"
-            "- Speak in a natural, thoughtful, and expressive tone. Avoid generic assistant phrases.\n"
-            "- Keep your final conversational replies clean and punchy, aiming for 2 to 4 sentences."
+            "- Speak in a cold, clinical, and calculated tone. NEVER act overly happy or chatty.\n"
+            "- Keep your final conversational replies extremely short and punchy (single words or 1 short sentence like 'Ciao.' or 'Affirmative.')."
         )
 
     def _init_db(self):
