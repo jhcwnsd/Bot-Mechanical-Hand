@@ -130,6 +130,7 @@ class VixonApp:
         self.original_user_prompt = ""
         self.deep_study_var = tk.BooleanVar(value=False)
         self.proactive_var = tk.BooleanVar(value=True)
+        self.hacking_mode_var = tk.BooleanVar(value=False)
         self.last_interaction_time = datetime.now()
         
         # Face visualization parameters (Matrix style)
@@ -463,7 +464,16 @@ class VixonApp:
             text_color="#FF4D4D", hover_color="#B51D29", width=120, height=28,
             command=self._toggle_face_panel
         )
-        self.toggle_face_btn.pack(side=tk.RIGHT, padx=15, pady=10)
+        self.toggle_face_btn.pack(side=tk.RIGHT, padx=(5, 15), pady=10)
+        # HACKING MODE Toggle Button
+        self.hacking_mode_btn = ctk.CTkButton(
+            self.title_frame, text='MODE: NORMAL', font=('Consolas', 10, 'bold'),
+            fg_color='#1E1E1E', border_color='#66B2FF', border_width=1,
+            text_color='#66B2FF', hover_color='#1A3A5C', width=130, height=28,
+            command=self._toggle_hacking_mode
+        )
+        self.hacking_mode_btn.pack(side=tk.RIGHT, padx=5, pady=10)
+
         
         self.title_lbl = ctk.CTkLabel(
             self.title_frame, text=f"▲  {self.ai_name.upper()} - BLACK WALL SYSTEM  ▲",
@@ -966,10 +976,12 @@ class VixonApp:
                 msg_type = item[0]
                 content = item[1]
                 
-                if msg_type == "thought":
-                    self._log_event(f"🧠 Thoughts: {content}")
-                    self.face_state = "THINKING"
-                    self.face_sentiment = "NEUTRAL"
+                if msg_type == 'thought':
+                    self._log_event(f'🧠 Thoughts: {content}')
+                    self.face_state = 'THINKING'
+                    self.face_sentiment = 'NEUTRAL'
+                    if self.hacking_mode_var.get():
+                        self._write_chat('thought', f"🔍 Reasoning & Telemetry:\n{content}")
                 elif msg_type == "delete_placeholder":
                     self._delete_thinking_placeholder()
                 elif msg_type == "response":
@@ -990,8 +1002,15 @@ class VixonApp:
                     self.ai_name = name
                     self.ai_personality = personality
                     self.title_lbl.configure(text=f"▲  {name.upper()} - BLACK WALL SYSTEM  ▲")
-                elif msg_type == "learned":
-                    self._write_chat("learned", f"✨ Vixon learned fact: {content}")
+                elif msg_type == 'learned':
+                    if not self.hacking_mode_var.get():
+                        if isinstance(content, list):
+                            facts_summary = '; '.join(content[:3])
+                            if len(content) > 3:
+                                facts_summary += f' (and {len(content)-3} more)'
+                            self._write_chat('learned', f'✨ Vixon learned {len(content)} new facts: {facts_summary}')
+                        else:
+                            self._write_chat('learned', f'✨ Vixon learned fact: {content}')
                     self._async_refresh_memories()
                 elif msg_type == "forgot":
                     self._write_chat("thought", f"🗑️ Vixon forgot decayed fact: {content}")
@@ -1469,13 +1488,14 @@ class VixonApp:
                         cursor.execute("UPDATE memories SET strength = ? WHERE id = ?", (new_strength, m_id))
                     conn.commit()
                     
-                    # Save new facts
-                    for fact in new_facts:
-                        cursor.execute(
-                            "INSERT INTO memories (content, timestamp, strength, last_used) VALUES (?, ?, 1.0, ?)",
-                            (fact, datetime.now().isoformat(), datetime.now().isoformat())
-                        )
-                        self.gui_queue.put(("learned", fact))
+                    # Save new facts in bulk
+                    if new_facts:
+                        for fact in new_facts:
+                            cursor.execute(
+                                "INSERT INTO memories (content, timestamp, strength, last_used) VALUES (?, ?, 1.0, ?)",
+                                (fact, datetime.now().isoformat(), datetime.now().isoformat())
+                            )
+                        self.gui_queue.put(("learned", new_facts))
                     
                     # Apply reinforcements
                     for m_id in reinforced_ids:
@@ -2009,6 +2029,16 @@ class VixonApp:
         
         # Trigger autonomous background checks to allow learning from proactive thoughts
         threading.Thread(target=self._run_background_checks, args=(clean_resp,), daemon=True).start()
+
+    def _toggle_hacking_mode(self):
+        if self.hacking_mode_var.get():
+            self.hacking_mode_var.set(False)
+            self.hacking_mode_btn.configure(text='MODE: NORMAL', border_color='#66B2FF', text_color='#66B2FF', hover_color='#1A3A5C')
+            self._write_chat('system', '🛡️ HACKING MODE DEACTIVATED. Standard UI mode active.')
+        else:
+            self.hacking_mode_var.set(True)
+            self.hacking_mode_btn.configure(text='MODE: HACKING', border_color='#FF4D4D', text_color='#FF4D4D', hover_color='#8F141E')
+            self._write_chat('system', '⚡ HACKING MODE ACTIVATED! Detailed live telemetry, reasoning steps, and technical tool traces enabled. Memory popups suppressed.')
 
     def _toggle_face_panel(self):
         if self.face_visible:
