@@ -774,53 +774,60 @@ class VixonApp:
         )
         self.send_btn.pack(side=tk.RIGHT)
         
-        # Inline tactical command approval box with 4 Quick Control Options
-        self.approval_frame = ctk.CTkFrame(self.right_panel, fg_color='#18181A', border_color='#28A745', border_width=1, height=60)
+        # Inline tactical command approval box with 4 Quick Control Options & Keyboard Shortcuts (1, 2, 3, 4)
+        self.approval_frame = ctk.CTkFrame(self.right_panel, fg_color='#18181A', border_color='#66B2FF', border_width=1, height=65)
         
         self.approval_lbl = ctk.CTkLabel(
-            self.approval_frame, text='Execute Command Request...',
-            font=('Consolas', 10, 'bold'), text_color='#00FF66'
+            self.approval_frame, text='Execute Command Request (Press 1, 2, 3, or 4 on keyboard)...',
+            font=('Consolas', 10, 'bold'), text_color='#66B2FF'
         )
         self.approval_lbl.pack(side=tk.TOP, anchor='w', padx=15, pady=(6, 2))
         
         self.btn_bar = ctk.CTkFrame(self.approval_frame, fg_color='transparent')
         self.btn_bar.pack(fill=tk.X, padx=10, pady=(0, 6))
         
-        # Option 1: ALLOW ONCE (Green)
+        # Soft cyan & muted accents (easy on the eyes)
         self.btn_opt1 = ctk.CTkButton(
-            self.btn_bar, text='1. ALLOW ONCE', font=('Consolas', 9, 'bold'),
-            fg_color='#1E1E1E', border_color='#28A745', border_width=1,
-            text_color='#00FF66', hover_color='#1E5E2F', height=26,
+            self.btn_bar, text='[1] ALLOW ONCE', font=('Consolas', 9, 'bold'),
+            fg_color='#1E1E1E', border_color='#66B2FF', border_width=1,
+            text_color='#66B2FF', hover_color='#1A3A5C', height=26,
             command=lambda: self._handle_approval_option(1)
         )
         self.btn_opt1.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
         
-        # Option 2: ALLOW TWICE (Green)
         self.btn_opt2 = ctk.CTkButton(
-            self.btn_bar, text='2. ALLOW TWICE', font=('Consolas', 9, 'bold'),
-            fg_color='#1E1E1E', border_color='#28A745', border_width=1,
-            text_color='#00FF66', hover_color='#1E5E2F', height=26,
+            self.btn_bar, text='[2] ALLOW TWICE', font=('Consolas', 9, 'bold'),
+            fg_color='#1E1E1E', border_color='#66B2FF', border_width=1,
+            text_color='#66B2FF', hover_color='#1A3A5C', height=26,
             command=lambda: self._handle_approval_option(2)
         )
         self.btn_opt2.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
         
-        # Option 3: ALWAYS ALLOW (Green)
         self.btn_opt3 = ctk.CTkButton(
-            self.btn_bar, text='3. ALWAYS ALLOW', font=('Consolas', 9, 'bold'),
-            fg_color='#1E1E1E', border_color='#00FF66', border_width=1,
-            text_color='#00FF66', hover_color='#1E5E2F', height=26,
+            self.btn_bar, text='[3] ALWAYS ALLOW', font=('Consolas', 9, 'bold'),
+            fg_color='#1E1E1E', border_color='#FFCC00', border_width=1,
+            text_color='#FFCC00', hover_color='#5C4A00', height=26,
             command=lambda: self._handle_approval_option(3)
         )
         self.btn_opt3.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
         
-        # Option 4: NO WITH EXPLANATION (Red/Green)
         self.btn_opt4 = ctk.CTkButton(
-            self.btn_bar, text='4. NO + EXPLAIN', font=('Consolas', 9, 'bold'),
+            self.btn_bar, text='[4] NO + EXPLAIN', font=('Consolas', 9, 'bold'),
             fg_color='#1E1E1E', border_color='#FF4D4D', border_width=1,
             text_color='#FF4D4D', hover_color='#8F141E', height=26,
             command=lambda: self._handle_approval_option(4)
         )
         self.btn_opt4.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        
+        # Global Key Bindings for 1, 2, 3, 4
+        self.root.bind('<Key-1>', lambda e: self._on_key_shortcut(1))
+        self.root.bind('<Key-2>', lambda e: self._on_key_shortcut(2))
+        self.root.bind('<Key-3>', lambda e: self._on_key_shortcut(3))
+        self.root.bind('<Key-4>', lambda e: self._on_key_shortcut(4))
+        self.root.bind('<KP_1>', lambda e: self._on_key_shortcut(1))
+        self.root.bind('<KP_2>', lambda e: self._on_key_shortcut(2))
+        self.root.bind('<KP_3>', lambda e: self._on_key_shortcut(3))
+        self.root.bind('<KP_4>', lambda e: self._on_key_shortcut(4))
 
     def _log_event(self, msg):
         self.root.after(0, self._async_log_event, msg)
