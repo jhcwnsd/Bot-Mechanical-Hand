@@ -1497,6 +1497,12 @@ class VixonApp:
         except Exception as e:
             self._log_event(f"Background logs processing failed: {e}")
 
+    def _on_key_shortcut(self, num):
+        # If approval frame is currently displayed on screen, trigger option button directly!
+        if self.approval_frame.winfo_ismapped():
+            self._handle_approval_option(num)
+            return 'break'
+
     def _handle_approval_option(self, option_id):
         self.approval_frame.pack_forget()
         if option_id == 1:
