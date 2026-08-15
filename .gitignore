@@ -17,20 +17,3 @@ tmp.txt
 *.jpg
 *.png
 *.zip
-
-# Temporary scratch & test scripts
-apply_*.py
-fix*.py
-gen_*.py
-test_*.py
-cleanup_refusals.py
-recover_refusals.py
-jailbreak_test.py
-edge_test.py
-revert_to_roman.py
-extract_mp_mesh.py
-read_logs.py
-Message from Vixon to Creator.txt
-Mechanical-Hand-Bot/
-aircrack-ng/
-
